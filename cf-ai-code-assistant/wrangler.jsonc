@@ -10,7 +10,7 @@
 	"migrations": [
 		{
 			"new_sqlite_classes": [
-				"MyDurableObject"
+				"AssistantDO"
 			],
 			"tag": "v1"
 		}
@@ -18,10 +18,13 @@
 	"durable_objects": {
 		"bindings": [
 			{
-				"class_name": "MyDurableObject",
+				"class_name": "AssistantDO",
 				"name": "MY_DURABLE_OBJECT"
 			}
 		]
+	},
+	"ai": {
+		"binding": "AI"	
 	},
 	"observability": {
 		"enabled": true
