@@ -12,7 +12,7 @@ export default {
 	 * @returns The response to be sent back to the client
 	 */
 	async fetch(request, env, ctx): Promise<Response> {
-
+		
 		const id = env.MY_DURABLE_OBJECT.idFromName("default-session")
 		const stub = env.MY_DURABLE_OBJECT.get(id);
 
