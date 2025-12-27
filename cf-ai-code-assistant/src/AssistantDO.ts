@@ -197,15 +197,51 @@ export class AssistantDO extends DurableObject<Env> {
         }
     }
 
-    async askAssistantAI(question: string): Promise<string> {
-        const response = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
+    async askAssistantAI(question: string): Promise<{stream: ReadableStream; fullText: () => Promise<string | undefined>}> {
+        const responseStream = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
             messages: [
                 {role: "system", content: this.getAssistantSystemPrompt()},
                 ...this.getChatHistoryFormatted(AssistantDO.CHAT_HISTORY_LENGTH),
                 {role: "user", content: question}
-            ]
+            ],
+            stream: true
         });
-        return response.response ?? "";
+
+        const [clientStream, internalStream] = responseStream.tee();
+        const reader = internalStream.getReader();
+
+        let buffer = "";
+        let currentText = "";
+        const decoder = new TextDecoder();
+        const fullTextPromise = (async () => {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+
+                for (const line of lines) {
+                    if (!line.startsWith("data:")) continue;
+                    const payload = line.replace("data:", "").trim();
+                    if (payload === "[DONE]") break;
+
+                    try {
+                        const json = JSON.parse(payload);
+                        if (json.response) {
+                            currentText += json.response;
+                        }
+                    } catch {
+                        // ignore malformed chunks
+                    }
+                }
+            }
+            return currentText;
+        });
+
+        return {stream: clientStream, fullText: fullTextPromise}
     }
 
     async fetch(request: Request): Promise<Response> {
@@ -232,17 +268,20 @@ export class AssistantDO extends DurableObject<Env> {
         console.log(settingFeedback);
 
         if (settingFeedback === "none") {
-            const answer = await this.askAssistantAI(requestedText);
+            const {stream, fullText} = await this.askAssistantAI(requestedText);
 
-            this.stateData.chatHistory.push({
-                question: requestedText,
-                answer: answer
-            });
-            await this.state.storage.put("stateData", this.stateData);
-
-            console.log(this.getChatHistoryFormatted(3));
+            fullText().then(async (finalAnswer) => {
+                this.stateData.chatHistory.push({
+                    question: requestedText,
+                    answer: finalAnswer ?? ""
+                });
+                await this.state.storage.put("stateData", this.stateData);
+                console.log(this.getChatHistoryFormatted(3));
+            })
             
-            return new Response(answer);
+            return new Response(stream, {
+                headers: { "content-type": "text/event-stream" },
+            });
         } else {
             return new Response(settingFeedback);
         }

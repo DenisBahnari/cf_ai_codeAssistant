@@ -12,11 +12,21 @@ export default {
 	 * @returns The response to be sent back to the client
 	 */
 	async fetch(request, env, ctx): Promise<Response> {
-		
-		const id = env.MY_DURABLE_OBJECT.idFromName("default-session")
-		const stub = env.MY_DURABLE_OBJECT.get(id);
 
-		return await stub.fetch(request);
+		const url = new URL(request.url);
+
+		if (request.method === "GET" && url.pathname === "/") {
+			return env.ASSETS.fetch(request);
+		}
+
+		if (request.method === "POST" && url.pathname === "/chat") {
+			const id = env.MY_DURABLE_OBJECT.idFromName("default-session")
+			const stub = env.MY_DURABLE_OBJECT.get(id);
+
+			return await stub.fetch(request);
+		}
+
+		return new Response("Not Found", {status: 404});
 	},
 
 } satisfies ExportedHandler<Env>;

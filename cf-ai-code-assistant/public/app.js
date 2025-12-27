@@ -25,8 +25,40 @@ async function sendMessage() {
 
     if (response.status === 204) return;
 
-    const answer = await response.text();
-    addMessage("bot", answer);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    let agentDiv = document.createElement("div");
+    agentDiv.className = "msg bot";
+    agentDiv.textContent = "Rob: ";
+    chat.appendChild(agentDiv);
+
+    let currentMsg = "";
+
+    while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        currentMsg += decoder.decode(value, {stream: true});
+
+        const lines = currentMsg.split("\n");
+        currentMsg = lines.pop() || "";
+
+        for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const payload = line.replace("data:", "").trim();
+            if (payload === "[DONE]") return;
+
+            try {
+                const json = JSON.parse(payload);
+                if (json.response) {
+                    agentDiv.textContent += json.response;
+                    chat.scrollTop = chat.scrollHeight;
+                }
+            } catch {
+                // Just ingore the token
+            }
+        }
+    }
 
   } catch (err) {
     addMessage("bot", "Error contacting assistant.");
