@@ -1,0 +1,54 @@
+body {
+  font-family: system-ui, sans-serif;
+  background: #0f172a;
+  color: #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  margin: 0;
+}
+
+#chat {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.msg {
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.user {
+  color: #93c5fd;
+}
+
+.bot {
+  color: #a7f3d0;
+}
+
+#input {
+  display: flex;
+  padding: 12px;
+  background: #020617;
+  border-top: 1px solid #334155;
+}
+
+#question {
+  flex: 1;
+  padding: 10px;
+  background: #020617;
+  border: 1px solid #334155;
+  color: #e5e7eb;
+  border-radius: 6px;
+}
+
+button {
+  margin-left: 8px;
+  padding: 10px 16px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
