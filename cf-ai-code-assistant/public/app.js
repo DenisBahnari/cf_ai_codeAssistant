@@ -1,6 +1,21 @@
 const chat = document.getElementById("chat");
 const input = document.getElementById("question");
 const sendBtn = document.getElementById("sendBtn");
+const micBtn = document.getElementById("micBtn");
+
+let listening = false;
+let finalTranscript = "";
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SpeechRecognition) {
+    micBtn.disabled = true;
+    micBtn.textContent = "🎤 not supported";
+}
+
+const recognition = new SpeechRecognition();
+recognition.lang = "en-US";
+recognition.continuous = true;
+recognition.interimResults = true;
+
 
 function addMessage(role, text) {
   const div = document.createElement("div");
@@ -66,6 +81,37 @@ async function sendMessage() {
   }
 }
 
+recognition.onresult = (event) => {
+  let interim = "";
+
+  for (let i = event.resultIndex; i < event.results.length; i++) {
+    const t = event.results[i][0].transcript;
+    if (event.results[i].isFinal) finalTranscript += t;
+    else interim += t;
+  }
+
+  input.value = finalTranscript + interim;
+};
+
+recognition.onend = () => {
+  if (listening) recognition.start();
+};
+
+recognition.onspeechend = () => {
+  recognition.stop();
+  listening = false;
+  micBtn.textContent = "🎤";
+
+  if (finalTranscript.trim()) {
+    sendMessage();
+    finalTranscript = "";
+  }
+};
+
+recognition.onerror = () => {
+  micBtn.textContent = "🎤";
+};
+
 sendBtn.addEventListener("click", sendMessage);
 
 input.addEventListener("keydown", (e) => {
@@ -73,3 +119,18 @@ input.addEventListener("keydown", (e) => {
     sendMessage();
   }
 });
+
+
+micBtn.addEventListener("click", () => {
+  if (listening) {
+    recognition.stop();
+    listening = false;
+    micBtn.textContent = "🎤";
+  } else {
+    recognition.start();
+    listening = true;
+    micBtn.textContent = "🎙️ Listening...";
+  }
+});
+
+
