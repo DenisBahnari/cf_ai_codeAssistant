@@ -1,21 +1,6 @@
 const chat = document.getElementById("chat");
 const input = document.getElementById("question");
 const sendBtn = document.getElementById("sendBtn");
-const micBtn = document.getElementById("micBtn");
-
-let listening = false;
-let finalTranscript = "";
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (!SpeechRecognition) {
-    micBtn.disabled = true;
-    micBtn.textContent = "🎤 not supported";
-}
-
-const recognition = new SpeechRecognition();
-recognition.lang = "en-US";
-recognition.continuous = true;
-recognition.interimResults = true;
-
 
 function addMessage(role, text) {
   const div = document.createElement("div");
@@ -81,6 +66,32 @@ async function sendMessage() {
   }
 }
 
+sendBtn.addEventListener("click", sendMessage);
+
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    sendMessage();
+  }
+});
+
+
+// ####### Speech Detection #######
+
+const micBtn = document.getElementById("micBtn");
+
+let listening = false;
+let finalTranscript = "";
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SpeechRecognition) {
+    micBtn.disabled = true;
+    micBtn.textContent = "🎤 not supported";
+}
+
+const recognition = new SpeechRecognition();
+recognition.lang = "en-US";
+recognition.continuous = true;
+recognition.interimResults = true;
+
 recognition.onresult = (event) => {
   let interim = "";
 
@@ -112,15 +123,6 @@ recognition.onerror = () => {
   micBtn.textContent = "🎤";
 };
 
-sendBtn.addEventListener("click", sendMessage);
-
-input.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    sendMessage();
-  }
-});
-
-
 micBtn.addEventListener("click", () => {
   if (listening) {
     recognition.stop();
@@ -133,4 +135,4 @@ micBtn.addEventListener("click", () => {
   }
 });
 
-
+// ####### Speech Detection #######
