@@ -246,6 +246,12 @@ export class AssistantDO extends DurableObject<Env> {
     }
 
     async fetch(request: Request): Promise<Response> {
+
+        if (request.method === "DELETE" && new URL(request.url).pathname === "/_destroy") {
+            await this.state.storage.deleteAll();
+            return new Response("Destroyed", { status: 200 });
+        }
+
         const requestedText = await request.text();
         const sessionId = await request.headers.get("x-session-id");
         ///// TEMP

@@ -47,6 +47,9 @@ export default {
 		if (request.method === "DELETE" && url.pathname == "/session") {
 			const sessionId = await request.text();
 			const response = await DB.deleteSession(env, sessionId);
+			const id = env.MY_DURABLE_OBJECT.idFromName(sessionId);
+			const stub = env.MY_DURABLE_OBJECT.get(id);
+			await stub.fetch("https://do/_destroy", { method: "DELETE" });
 			if (response.status === "success") {
 				return new Response(response.sessionId)
 			} else {
@@ -54,11 +57,21 @@ export default {
 			}
 		}
 
-		if (request.method === "GET" && url.pathname == "/all_messages") {
+		if (request.method === "POST" && url.pathname == "/all_messages") {
 			const sessionId = await request.text();
 			const response = await DB.getAllMessages(env, sessionId);
 			if (response.status === "success") {
 				return new Response(JSON.stringify(response.messages))
+			} else {
+				return new Response("Failed Operation", {status: 500});
+			}
+		}
+
+		if (request.method === "DELETE" && url.pathname == "/all_messages") {
+			const sessionId = await request.text();
+			const response = await DB.deleteAllMessages(env, sessionId);
+			if (response.status === "success") {
+				return new Response(response.messageId);
 			} else {
 				return new Response("Failed Operation", {status: 500});
 			}

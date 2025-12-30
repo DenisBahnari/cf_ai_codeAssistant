@@ -108,4 +108,17 @@ export class DB {
         }
     }
 
+    static async deleteAllMessages(env: Env, sessionId: string) {
+        try {
+            await env.assistant_sessions.prepare(`
+                DELETE FROM messages
+                WHERE session_id == ?
+            `).bind(sessionId).run();
+            return {status: "success", messageId: sessionId}
+        } catch (err) {
+            console.error("Failed to create message in DB:", err ?? "");
+            return {status: "failed", messageId: "-1"}
+        }
+    }
+
 }

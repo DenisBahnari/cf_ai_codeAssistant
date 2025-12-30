@@ -27,10 +27,34 @@ async function renderSessions() {
   sessions.forEach(s => {
     const div = document.createElement("div");
     div.className = "session";
-    div.textContent = s.session_name ?? s.id;
-    div.onclick = () => openSession(s.id);
+
+    const name = document.createElement("span");
+    name.textContent = s.session_name ?? s.id;
+    name.style.cursor = "pointer";
+    name.onclick = () => openSession(s.id);
+
+    const del = document.createElement("button");
+    del.textContent = "🗑";
+    del.className = "secondary";
+    del.style.marginLeft = "12px";
+
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm("Delete this session?")) return;
+
+      await api("/session", {
+        method: "DELETE",
+        body: s.id
+      });
+
+      renderSessions();
+    };
+
+    div.appendChild(name);
+    div.appendChild(del);
     list.appendChild(div);
   });
+
 
   document.getElementById("newSession").onclick = renderCreateSession;
 }
@@ -82,7 +106,8 @@ async function openSession(sessionId) {
     <div id="inputBar">
       <input id="question" placeholder="Hey Rob..." />
       <button id="send">Send</button>
-      <button id="micBtn">Mic</button>
+      <button id="micBtn">🎤</button>
+      <button id="clear">🧹</button>
       <button id="back">←</button>
     </div>
   `;
@@ -91,7 +116,46 @@ async function openSession(sessionId) {
 
   document.getElementById("back").onclick = renderSessions;
   document.getElementById("send").onclick = sendMessage;
+  document.getElementById("clear").onclick = clearHistory;
+
+  await loadMessages(sessionId);
 }
+
+
+async function loadMessages(sessionId) {
+  const chat = document.getElementById("chat");
+
+  const res = await api("/all_messages", {
+    method: "POST",
+    body: sessionId
+  });
+
+  const messages = await res.json();
+
+  chat.innerHTML = "";
+
+  messages.forEach(m => {
+    const div = document.createElement("div");
+    div.className = `msg ${m.role_name === "user" ? "user" : "bot"}`;
+    div.textContent =
+      `${m.role_name === "user" ? "You" : "Rob"}: ${m.content}`;
+    chat.appendChild(div);
+  });
+
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function clearHistory() {
+  if (!confirm("Clear all messages in this session?")) return;
+
+  await api("/all_messages", {
+    method: "DELETE",
+    body: currentSessionId
+  });
+
+  document.getElementById("chat").innerHTML = "";
+}
+
 
 
 // ######### Chat #########
