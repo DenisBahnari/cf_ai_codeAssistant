@@ -2,11 +2,56 @@ body {
   font-family: system-ui, sans-serif;
   background: #0f172a;
   color: #e5e7eb;
+  margin: 0;
+  height: 100vh;
+}
+
+button {
+  background: #2563eb;
+  border: none;
+  color: white;
+  padding: 10px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #334155;
+}
+
+input {
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #020617;
+  color: #e5e7eb;
+}
+
+#app {
+  height: 100%;
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  margin: 0;
 }
+
+/* Sessions */
+
+.sessions {
+  padding: 24px;
+}
+
+.session {
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.session:hover {
+  background: #020617;
+}
+
+/* Chat */
 
 #chat {
   flex: 1;
@@ -16,39 +61,15 @@ body {
 
 .msg {
   margin-bottom: 12px;
-  line-height: 1.4;
 }
 
-.user {
-  color: #93c5fd;
-}
+.user { color: #93c5fd; }
+.bot { color: #a7f3d0; }
 
-.bot {
-  color: #a7f3d0;
-}
-
-#input {
+#inputBar {
   display: flex;
+  gap: 8px;
   padding: 12px;
-  background: #020617;
   border-top: 1px solid #334155;
-}
-
-#question {
-  flex: 1;
-  padding: 10px;
   background: #020617;
-  border: 1px solid #334155;
-  color: #e5e7eb;
-  border-radius: 6px;
-}
-
-button {
-  margin-left: 8px;
-  padding: 10px 16px;
-  background: #2563eb;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
 }

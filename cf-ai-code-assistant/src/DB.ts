@@ -54,13 +54,13 @@ export class DB {
         }
     }
 
-    static async createMessage(env: Env, messageId: string, role: string, content: string) {
+    static async createMessage(env: Env, sessionId: string, role: string, content: string) {
         try {
             await env.assistant_sessions.prepare(`
                 INSERT INTO messages (session_id, role_name, content)
                 VALUES (?, ?, ?)
-            `).bind(messageId, role, content).run();
-            return {status: "success", messageId: messageId}
+            `).bind(sessionId, role, content).run();
+            return {status: "success", messageId: "1"}
         } catch (err) {
             console.error("Failed to create message in DB:", err ?? "");
             return {status: "failed", messageId: "-1"}
@@ -81,16 +81,17 @@ export class DB {
         }
     }
 
-    static async getAllMessages(env: Env) {
+    static async getAllMessages(env: Env, sessionId: string) {
         try {
             const messageRawData = await env.assistant_sessions.prepare(`
                 SELECT * FROM messages
-            `).run();
+                WHERE session_id = ?
+            `).bind(sessionId).run();
             const message = messageRawData.results;
-            return {status: "success", messageId: message}
+            return {status: "success", messages: message}
         } catch (err) {
             console.error("Failed to create message in DB:", err ?? "");
-            return {status: "failed", messageId: "-1"}
+            return {status: "failed", messages: "-1"}
         }
     }
 

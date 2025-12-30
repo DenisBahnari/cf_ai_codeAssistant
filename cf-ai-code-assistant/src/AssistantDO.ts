@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { DB } from "./DB";
 
 interface Chat {
     question: string,
@@ -246,6 +247,7 @@ export class AssistantDO extends DurableObject<Env> {
 
     async fetch(request: Request): Promise<Response> {
         const requestedText = await request.text();
+        const sessionId = await request.headers.get("x-session-id");
         ///// TEMP
         if (requestedText === "reset") {
             this.stateData = {
@@ -257,10 +259,12 @@ export class AssistantDO extends DurableObject<Env> {
             await this.state.storage.put("stateData", this.stateData);
         }
         //////
-        if (!requestedText.toLowerCase().includes("hey " + this.stateData.assistantName.toLowerCase())) {
+        if (!requestedText.toLowerCase().includes("hey " + this.stateData.assistantName.toLowerCase()) || sessionId == null) {
             return new Response(null, {status:204});
         }
         
+        DB.createMessage(this.env, sessionId, "user", requestedText);
+
         const settingAwnser = await this.askSettingsAI(requestedText);
         const settingFeedback = this.handleSettingResponse(settingAwnser);
 
@@ -276,6 +280,7 @@ export class AssistantDO extends DurableObject<Env> {
                     answer: finalAnswer ?? ""
                 });
                 await this.state.storage.put("stateData", this.stateData);
+                DB.createMessage(this.env, sessionId, "assistant", finalAnswer ?? "")
                 console.log(this.getChatHistoryFormatted(3));
             })
             
