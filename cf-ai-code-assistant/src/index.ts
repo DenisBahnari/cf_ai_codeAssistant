@@ -45,15 +45,19 @@ export default {
 		}
 
 		if (request.method === "DELETE" && url.pathname == "/session") {
-			const sessionId = await request.text();
-			const response = await DB.deleteSession(env, sessionId);
-			const id = env.MY_DURABLE_OBJECT.idFromName(sessionId);
-			const stub = env.MY_DURABLE_OBJECT.get(id);
-			await stub.fetch("https://do/_destroy", { method: "DELETE" });
-			if (response.status === "success") {
-				return new Response(response.sessionId)
+			const sessionId = await request.headers.get("x-session-id");
+			if (sessionId != null) {
+				const response = await DB.deleteSession(env, sessionId);
+				const id = env.MY_DURABLE_OBJECT.idFromName(sessionId);
+				const stub = env.MY_DURABLE_OBJECT.get(id);
+				await stub.fetch(request); // Delete DO
+				if (response.status === "success") {
+					return new Response(response.sessionId)
+				} else {
+					return new Response("Failed Operation", {status: 500});
+				}
 			} else {
-				return new Response("Failed Operation", {status: 500});
+				return new Response("Null Session Id", {status: 500})
 			}
 		}
 
@@ -68,12 +72,31 @@ export default {
 		}
 
 		if (request.method === "DELETE" && url.pathname == "/all_messages") {
-			const sessionId = await request.text();
-			const response = await DB.deleteAllMessages(env, sessionId);
-			if (response.status === "success") {
-				return new Response(response.messageId);
+			const sessionId = await request.headers.get("x-session-id");
+			if (sessionId != null) {
+				const response = await DB.deleteAllMessages(env, sessionId);
+				const id = env.MY_DURABLE_OBJECT.idFromName(sessionId);
+				const stub = env.MY_DURABLE_OBJECT.get(id);
+				await stub.fetch(request);
+				if (response.status === "success") {
+					return new Response(response.messageId);
+				} else {
+					return new Response("Failed Operation", {status: 500});
+				}
 			} else {
-				return new Response("Failed Operation", {status: 500});
+				return new Response("Null Session Id", {status: 500})
+			}
+		}
+
+		if (request.method === "POST" && url.pathname == "/project_context") {
+			const sessionId = await request.headers.get("x-session-id");
+			if (sessionId != null) {
+				const id = env.MY_DURABLE_OBJECT.idFromName(sessionId);
+				const stub = env.MY_DURABLE_OBJECT.get(id);
+				await stub.fetch(request);
+				return new Response("", {status: 200})
+			} else {
+				return new Response("Null Session Id", {status: 500})
 			}
 		}
 
@@ -83,7 +106,6 @@ export default {
 				console.log(sessionId);
 				const id = env.MY_DURABLE_OBJECT.idFromName(sessionId)
 				const stub = env.MY_DURABLE_OBJECT.get(id);
-
 				return await stub.fetch(request);
 			} else {
 				return new Response("Null Session Id", {status: 500})

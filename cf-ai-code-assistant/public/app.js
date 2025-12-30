@@ -44,6 +44,9 @@ async function renderSessions() {
 
       await api("/session", {
         method: "DELETE",
+        headers: {
+          "x-session-id": s.id
+        },
         body: s.id
       });
 
@@ -107,6 +110,7 @@ async function openSession(sessionId) {
       <input id="question" placeholder="Hey Rob..." />
       <button id="send">Send</button>
       <button id="micBtn">🎤</button>
+      <button id="selectFolder"> SelectFolder</button>
       <button id="clear">🧹</button>
       <button id="back">←</button>
     </div>
@@ -117,6 +121,7 @@ async function openSession(sessionId) {
   document.getElementById("back").onclick = renderSessions;
   document.getElementById("send").onclick = sendMessage;
   document.getElementById("clear").onclick = clearHistory;
+  document.getElementById("selectFolder").onclick = pickProjectFolder;
 
   await loadMessages(sessionId);
 }
@@ -150,12 +155,49 @@ async function clearHistory() {
 
   await api("/all_messages", {
     method: "DELETE",
+    headers: {
+      "x-session-id": currentSessionId
+    },
     body: currentSessionId
   });
 
   document.getElementById("chat").innerHTML = "";
 }
 
+
+async function pickProjectFolder() {
+  const handle = await window.showDirectoryPicker();
+  const entries = await buildTree(handle);
+  const bodyInfo = {
+    "rootName": handle.name,
+    "tree": entries,
+  }
+  console.log(bodyInfo);
+  // await api("/project_context", {
+  //   method: "POST",
+  //   headers: {
+  //     "x-session-id": currentSessionId
+  //   },
+  //   body: JSON.stringify(bodyInfo)
+  // });
+}
+
+async function buildTree(dirHandle, base = "") {
+  const entries = [];
+
+  for await (const [name, handle] of dirHandle.entries()) {
+    const path = base ? `${base}/${name}` : name;
+
+    if (handle.kind === "directory") {
+      entries.push({ path, type: "dir" });
+      entries.push(...await buildTree(handle, path));
+    } else {
+      entries.push({ path, type: "file" });
+    }
+  }
+
+  return entries;
+}
 
 
 // ######### Chat #########

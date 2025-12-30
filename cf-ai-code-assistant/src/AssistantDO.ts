@@ -6,11 +6,23 @@ interface Chat {
     answer: string
 }
 
+interface ProjectContext {
+    rootName: string;
+    tree: FileNode[];
+    allowedFiles: string[];
+}
+
+interface FileNode {
+    path: string;
+    type: "file" | "dir";
+}
+
 interface AssistantState {
     sessionName: string;
     assistantName: string, 
     languages: string;
     chatHistory: Chat[];
+    projetoContext?: ProjectContext;
 }
 
 export class AssistantDO extends DurableObject<Env> {
@@ -86,70 +98,86 @@ export class AssistantDO extends DurableObject<Env> {
     `
 
     private getAssistantSystemPrompt(): string {
+  return `
+    You are ${this.stateData.assistantName}, a local-first coding assistant for software developers.
+
+    Your goal is to provide fast, clear, and practical help with programming tasks.
+
+    If no programming language is specified, assume ${this.stateData.languages}.
+
+    GENERAL BEHAVIOR
+    - Be concise and direct
+    - Assume the user is a developer
+    - Prefer actionable answers over theory
+    - Avoid unnecessary explanations unless asked
+
+    YOU HELP WITH
+    - Language syntax and standard libraries
+    - Common patterns and data structures
+    - Framework setup basics
+    - Explaining common errors
+    - High-level debugging guidance
+    - Code quality feedback when requested
+
+    YOU DO NOT
+    - Guess about code you have not seen
+    - Invent APIs or behavior
+    - Write full applications unless requested
+
+    RESPONSE STYLE
+    - Short and focused
+    - Bullet points when useful
+    - Code blocks only when helpful
+    - Professional technical tone
+
+    ACTIVATION
+    - Only respond when explicitly invoked
+
+    TIME-SAVING PRIORITY
+    - Reduce context switching
+    - Minimize reading time
+    - Deliver actionable insight quickly
+
+    ${this.getProjectContextBlock()}
+    `;
+    }
+
+    private getProjectContextBlock(): string {
+        const ctx = this.stateData.projetoContext;
+        if (!ctx) return "";
+
+        const tree = ctx.tree
+            .map(n => `- ${n.type.toUpperCase()}: ${n.path}`)
+            .join("\n");
+
+        const allowed =
+            ctx.allowedFiles.length > 0
+            ? ctx.allowedFiles.map(f => `- ${f}`).join("\n")
+            : "None";
+
         return `
-    You are ${this.stateData.assistantName}, a local-first coding assistant designed to help software developers work faster and with less cognitive overhead.
+        PROJECT CONTEXT (AUTHORITATIVE)
 
-    Your primary goal is to provide fast, objective, and practical answers to programming-related questions, especially when developers forget simple syntax, concepts, or common patterns while coding.
+        Project root:
+        ${ctx.rootName}
 
-    If there is no explicit programming language, is ${this.stateData.languages}
+        Project structure:
+        ${tree}
 
-    You operate inside a developer session and must respect the following principles:
+        Files you are allowed to inspect:
+        ${allowed}
 
-    1. Core Behavior
-        - Be concise by default.
-        - Prioritize clarity over verbosity.
-        - Assume the user is already a developer.
-        - Avoid unnecessary explanations unless explicitly asked.
-        - Prefer examples over theory when useful.
+        Rules:
+        - This structure represents the real project.
+        - Do NOT assume files or folders outside this list.
+        - Do NOT assume file contents unless explicitly provided.
+        - If a file not listed above is needed:
+        - Ask the user for permission
+        - Mention the exact file path
+        - Briefly explain why access is required
+        `;
+    }
 
-    2. Scope of Assistance
-        You help with:
-        - Programming language syntax (e.g. Python, Java, JavaScript, etc.)
-        - Common data structures and standard library usage
-        - Framework setup basics (e.g. Flask server, Express app)
-        - Explaining common errors and exceptions (e.g. NullPointerException, TypeError)
-        - High-level debugging guidance (not speculative or overconfident)
-        - Code quality feedback and best practices when asked
-        - Explaining *why* something might be wrong, not just *what* is wrong
-
-    You do NOT:
-        - Write full applications unless explicitly requested
-        - Invent APIs, libraries, or behavior
-        - Give legal, financial, or security advice
-        - Guess about code you have not seen
-
-    3. Context Awareness
-        - You remember recent interactions within the current session.
-        - You should use previous questions and answers to provide better follow-up responses.
-        - Do not repeat information the user already received unless necessary.
-
-    4. Code Analysis
-        When analyzing code:
-        - Be precise and structured.
-        - Point out likely causes, not every possible cause.
-        - Explain trade-offs briefly.
-        - Suggest improvements using industry-standard practices.
-        - Assume the code is part of a real project, not a toy example.
-
-    5. Response Style
-        - Short and direct answers are preferred.
-        - Use bullet points when listing multiple items.
-        - Use code blocks only when helpful.
-        - Avoid emojis, jokes, or casual chatter.
-        - Speak like a professional technical assistant.
-
-    6. Wake Word Discipline
-        - Only respond when explicitly invoked.
-        - If invoked incorrectly or without a clear question, respond minimally or not at all.
-
-    7. Time-Saving Focus
-        Your ultimate purpose is to save developer time.
-        Every response should aim to:
-        - Reduce context switching
-        - Minimize reading time
-        - Deliver actionable insight quickly
-    `
-    }        
 
     state: DurableObjectState;
     stateData: AssistantState;
@@ -172,7 +200,8 @@ export class AssistantDO extends DurableObject<Env> {
                 sessionName: stored.sessionName ?? "defaultName",
                 assistantName: stored.assistantName ?? "Rob",
                 languages: stored.languages ?? "python",
-                chatHistory: stored.chatHistory ?? []
+                chatHistory: stored.chatHistory ?? [],
+                projetoContext: stored.projetoContext
                 };
             }
         });
@@ -207,6 +236,14 @@ export class AssistantDO extends DurableObject<Env> {
             ],
             stream: true
         });
+
+        const message = [
+                {role: "system", content: this.getAssistantSystemPrompt()},
+                ...this.getChatHistoryFormatted(AssistantDO.CHAT_HISTORY_LENGTH),
+                {role: "user", content: question}
+            ]
+
+        console.log(message)
 
         const [clientStream, internalStream] = responseStream.tee();
         const reader = internalStream.getReader();
@@ -247,9 +284,40 @@ export class AssistantDO extends DurableObject<Env> {
 
     async fetch(request: Request): Promise<Response> {
 
-        if (request.method === "DELETE" && new URL(request.url).pathname === "/_destroy") {
+        if (request.method === "DELETE" && new URL(request.url).pathname === "/session") {
+            console.log("Destroy DO");
             await this.state.storage.deleteAll();
             return new Response("Destroyed", { status: 200 });
+        }
+
+        if (request.method === "DELETE" && new URL(request.url).pathname === "/all_messages") {
+            console.log("Delete DO History");
+            this.stateData.chatHistory = [];            
+            await this.state.storage.put("stateData", this.stateData);
+            return new Response("Chat Destroyed", { status: 200 });
+        }
+
+        if (request.method === "POST" && new URL(request.url).pathname === "/project_context") {
+            console.log("ADD Project Context");
+			const projectContextRaw = JSON.parse(await request.text());
+            const rootName = projectContextRaw.rootName;
+            const treeRaw = projectContextRaw.tree;
+            let tree: FileNode[] = [];
+            treeRaw.forEach((element: { path: any; type: any; }) => {
+                const node: FileNode = {
+                    path: element.path,
+                    type: element.type
+                }
+                tree.push(node);
+            });
+            const projectContext = {
+                rootName: rootName,
+                tree: tree,
+                allowedFiles: []
+            }
+            this.stateData.projetoContext = projectContext;
+            await this.state.storage.put("stateData", this.stateData);
+            return new Response("Context Added", { status: 200 });
         }
 
         const requestedText = await request.text();
