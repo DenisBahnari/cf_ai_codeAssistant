@@ -54,6 +54,57 @@ export class DB {
         }
     }
 
+    static async createMessage(env: Env, messageId: string, role: string, content: string) {
+        try {
+            await env.assistant_sessions.prepare(`
+                INSERT INTO messages (session_id, role_name, content)
+                VALUES (?, ?, ?)
+            `).bind(messageId, role, content).run();
+            return {status: "success", messageId: messageId}
+        } catch (err) {
+            console.error("Failed to create message in DB:", err ?? "");
+            return {status: "failed", messageId: "-1"}
+        }
+    }
 
+    static async getMessage(env: Env, messageId: string) {
+        try {
+            const messageRawData = await env.assistant_sessions.prepare(`
+                SELECT * FROM messages
+                WHERE id == ?
+            `).bind(messageId).run();
+            const message = messageRawData.results[0];
+            return {status: "success", messageId: message}
+        } catch (err) {
+            console.error("Failed to create message in DB:", err ?? "");
+            return {status: "failed", messageId: "-1"}
+        }
+    }
+
+    static async getAllMessages(env: Env) {
+        try {
+            const messageRawData = await env.assistant_sessions.prepare(`
+                SELECT * FROM messages
+            `).run();
+            const message = messageRawData.results;
+            return {status: "success", messageId: message}
+        } catch (err) {
+            console.error("Failed to create message in DB:", err ?? "");
+            return {status: "failed", messageId: "-1"}
+        }
+    }
+
+    static async deleteMessage(env: Env, messageId: string) {
+        try {
+            await env.assistant_sessions.prepare(`
+                DELETE FROM messages
+                WHERE id == ?
+            `).bind(messageId).run();
+            return {status: "success", messageId: messageId}
+        } catch (err) {
+            console.error("Failed to create message in DB:", err ?? "");
+            return {status: "failed", messageId: "-1"}
+        }
+    }
 
 }
