@@ -173,13 +173,13 @@ async function pickProjectFolder() {
     "tree": entries,
   }
   console.log(bodyInfo);
-  // await api("/project_context", {
-  //   method: "POST",
-  //   headers: {
-  //     "x-session-id": currentSessionId
-  //   },
-  //   body: JSON.stringify(bodyInfo)
-  // });
+  await api("/project_context", {
+    method: "POST",
+    headers: {
+      "x-session-id": currentSessionId
+    },
+    body: JSON.stringify(bodyInfo)
+  });
 }
 
 async function buildTree(dirHandle, base = "") {

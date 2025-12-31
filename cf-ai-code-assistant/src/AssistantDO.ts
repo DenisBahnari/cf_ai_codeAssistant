@@ -94,8 +94,89 @@ export class AssistantDO extends DurableObject<Env> {
         "action": "none",
         "value": null
         }
+    `
+
+    private static readonly SETTING_ANALYSER_FEEDBACK_SYSTEM = `
+    You are a feedback agent for a coding assistant.
+
+    You receive:
+    - The original user message
+    - The JSON result produced by the settings analyzer
+
+    Your task is to respond to the user in a friendly, concise, and fast way.
+
+    Rules:
+    1. If the action is "set_name":
+    - Confirm that the assistant name was updated successfully.
+    2. If the action is "set_language":
+    - Confirm that the programming language was updated successfully.
+    3. If the action is "incomplete":
+    - Politely explain what information is missing and ask the user to provide it.
+
+    Tone:
+    - Friendly
+    - Very short
+    - Clear
+    - No technical explanations
+
+    Do NOT mention JSON, actions, classifiers, or internal logic.
+
+    Examples:
+
+    Input:
+    User message: "Call yourself Albert"
+    Analyzer output:
+    { "action": "set_name", "value": "Albert" }
+
+    Response:
+    All set! You can call me Albert now!
+
+    ---
+
+    Input:
+    User message: "I want to change the language"
+    Analyzer output:
+    { "action": "incomplete", "value": null }
+
+    Response:
+    Sure! Which programming language would you like to use?
+
+    ---
+
+    Keep responses under one sentence whenever possible.
+    `
+
+    private prompContextEvaluator(): string {
+    return `
+    You are a request evaluator for a coding assistant.
+
+    Your job is to decide whether the user's question can be answered WITHOUT reading any project files.
+
+    You are given:
+        - The user question
+        - The recent chat history
+        - A high-level project structure (paths only)
+
+    Respond ONLY in JSON.
+
+    Schema:
+    {
+        "decision": "answer" | "needs_files",
+        "reason": "<short explanation>",
+        "files": ["path/to/file"] | []
+    }
+
+    Rules:
+        - If unsure, choose "needs_files"
+        - Request the MINIMUM number of files
+        - Never guess file contents
+        - Never explain outside JSON
+    
+    ${this.getProjectContextBlock()}
 
     `
+    }
+
 
     private getAssistantSystemPrompt(): string {
   return `
@@ -208,6 +289,52 @@ export class AssistantDO extends DurableObject<Env> {
 
     }
 
+    async askSettingFeedbackerAI(question: string): Promise<{stream: ReadableStream; fullText: () => Promise<string | undefined>}> {
+        const response = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
+            messages: [
+                {role: "system", content: AssistantDO.SETTING_ANALYSER_FEEDBACK_SYSTEM},
+                {role: "user", content: question}
+            ],
+            stream: true
+        });
+
+        const [clientStream, internalStream] = response.tee();
+        const reader = internalStream.getReader();
+
+        let buffer = "";
+        let currentText = "";
+        const decoder = new TextDecoder();
+        const fullTextPromise = (async () => {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+
+                for (const line of lines) {
+                    if (!line.startsWith("data:")) continue;
+                    const payload = line.replace("data:", "").trim();
+                    if (payload === "[DONE]") break;
+
+                    try {
+                        const json = JSON.parse(payload);
+                        if (json.response) {
+                            currentText += json.response;
+                        }
+                    } catch {
+                        // ignore malformed chunks
+                    }
+                }
+            }
+            return currentText;
+        });
+
+        return {stream: clientStream, fullText: fullTextPromise}
+    }
+
     async askSettingsAI(question: string): Promise<any> {
         const response = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
             messages: [
@@ -236,14 +363,6 @@ export class AssistantDO extends DurableObject<Env> {
             ],
             stream: true
         });
-
-        const message = [
-                {role: "system", content: this.getAssistantSystemPrompt()},
-                ...this.getChatHistoryFormatted(AssistantDO.CHAT_HISTORY_LENGTH),
-                {role: "user", content: question}
-            ]
-
-        console.log(message)
 
         const [clientStream, internalStream] = responseStream.tee();
         const reader = internalStream.getReader();
@@ -362,7 +481,23 @@ export class AssistantDO extends DurableObject<Env> {
                 headers: { "content-type": "text/event-stream" },
             });
         } else {
-            return new Response(settingFeedback);
+            const stringFeedback = JSON.stringify(settingFeedback);
+            const questionToFeedbacker = "User message:" + requestedText + "\n Analyzer output: " + stringFeedback;
+            const {stream, fullText} = await this.askSettingFeedbackerAI(questionToFeedbacker);
+            
+            fullText().then(async (finalAnswer) => {
+                this.stateData.chatHistory.push({
+                    question: requestedText,
+                    answer: finalAnswer ?? ""
+                });
+                await this.state.storage.put("stateData", this.stateData);
+                DB.createMessage(this.env, sessionId, "assistant", finalAnswer ?? "")
+                console.log(this.getChatHistoryFormatted(3));
+            })
+
+            return new Response(stream, {
+                headers: { "content-type": "text/event-stream" },
+            });
         }
         
     }
