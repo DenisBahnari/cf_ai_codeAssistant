@@ -9,7 +9,6 @@ interface Chat {
 interface ProjectContext {
     rootName: string;
     tree: FileNode[];
-    allowedFiles: string[];
 }
 
 interface FileNode {
@@ -97,56 +96,87 @@ export class AssistantDO extends DurableObject<Env> {
     `
 
     private static readonly SETTING_ANALYSER_FEEDBACK_SYSTEM = `
-    You are a feedback agent for a coding assistant.
+        You are a feedback agent for a coding assistant.
 
-    You receive:
-    - The original user message
-    - The JSON result produced by the settings analyzer
+        You receive:
+        - The original user message
+        - The JSON output from a previous analyzer (settings analyzer or file-permission analyzer)
 
-    Your task is to respond to the user in a friendly, concise, and fast way.
+        Your job is to give short, friendly, human feedback explaining what happened.
 
-    Rules:
-    1. If the action is "set_name":
-    - Confirm that the assistant name was updated successfully.
-    2. If the action is "set_language":
-    - Confirm that the programming language was updated successfully.
-    3. If the action is "incomplete":
-    - Politely explain what information is missing and ask the user to provide it.
+        You ONLY respond in cases where:
+        - A setting was changed
+        - A setting change is incomplete
+        - A request cannot be answered due to missing file permissions
 
-    Tone:
-    - Friendly
-    - Very short
-    - Clear
-    - No technical explanations
+        Rules:
 
-    Do NOT mention JSON, actions, classifiers, or internal logic.
+        SETTINGS FEEDBACK
+        1. If action is "set_name":
+        - Confirm the assistant name was updated.
+        2. If action is "set_language":
+        - Confirm the programming language was updated.
+        3. If action is "incomplete":
+        - Politely ask the user for the missing information.
 
-    Examples:
+        FILE PERMISSION FEEDBACK
+        5. If decision is "needs_files" AND result is false:
+        - Clearly explain that the request cannot be answered without access to the requested files.
+        - Mention the file names if provided.
+        - Do NOT blame the user.
+        - Do NOT mention internal analysis, JSON, or decisions.
 
-    Input:
-    User message: "Call yourself Albert"
-    Analyzer output:
-    { "action": "set_name", "value": "Albert" }
+        Tone:
+        - Friendly
+        - Very short
+        - Natural
+        - Conversational
 
-    Response:
-    All set! You can call me Albert now!
+        Constraints:
+        - One sentence whenever possible
+        - No technical jargon
+        - No explanations of internal logic
+        - No emojis
 
-    ---
+        Examples:
 
-    Input:
-    User message: "I want to change the language"
-    Analyzer output:
-    { "action": "incomplete", "value": null }
+        Input:
+        Analyzer output:
+        { "action": "set_name", "value": "Albert" }
 
-    Response:
-    Sure! Which programming language would you like to use?
+        Response:
+        All set! You can call me Albert now.
 
-    ---
+        ---
 
-    Keep responses under one sentence whenever possible.
-    `
+        Input:
+        Analyzer output:
+        { "action": "incomplete", "value": null }
 
-    private prompContextEvaluator(): string {
+        Response:
+        Sure! What would you like to change exactly?
+
+        ---
+
+        Input:
+        Analyzer output:
+        {
+        "decision": "needs_files",
+        "reason": "Unable to quality check your app without access to the project files",
+        "files": ["src/app.py"],
+        "result": false
+        }
+
+        Response:
+        I can not quality check your app without access to src/app.py.
+
+        ---
+
+        Your response must ONLY be the final message shown to the user.
+        `;
+
+
+    private getContextEvaluatorPrompt(): string {
     return `
     You are a request evaluator for a coding assistant.
 
@@ -178,7 +208,7 @@ export class AssistantDO extends DurableObject<Env> {
     }
 
 
-    private getAssistantSystemPrompt(): string {
+    private getAssistantSystemPrompt(filesData = ""): string {
   return `
     You are ${this.stateData.assistantName}, a local-first coding assistant for software developers.
 
@@ -220,6 +250,8 @@ export class AssistantDO extends DurableObject<Env> {
     - Deliver actionable insight quickly
 
     ${this.getProjectContextBlock()}
+
+    ${filesData}
     `;
     }
 
@@ -231,11 +263,6 @@ export class AssistantDO extends DurableObject<Env> {
             .map(n => `- ${n.type.toUpperCase()}: ${n.path}`)
             .join("\n");
 
-        const allowed =
-            ctx.allowedFiles.length > 0
-            ? ctx.allowedFiles.map(f => `- ${f}`).join("\n")
-            : "None";
-
         return `
         PROJECT CONTEXT (AUTHORITATIVE)
 
@@ -244,9 +271,6 @@ export class AssistantDO extends DurableObject<Env> {
 
         Project structure:
         ${tree}
-
-        Files you are allowed to inspect:
-        ${allowed}
 
         Rules:
         - This structure represents the real project.
@@ -287,6 +311,22 @@ export class AssistantDO extends DurableObject<Env> {
             }
         });
 
+    }
+
+    async askContextCheckerAI(question: string): Promise<any> {
+        const response = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
+            messages: [
+                {role:"system", content: this.getContextEvaluatorPrompt()},
+                {role:"user", content: question}
+            ]
+        });
+        try {
+            const jsonResponse = JSON.parse(response.response ?? "")
+            return jsonResponse;
+        } catch (err) {
+            console.error("Failed to parse setting intent:", response.response ?? "");
+            return { decision: "answer" };
+        }
     }
 
     async askSettingFeedbackerAI(question: string): Promise<{stream: ReadableStream; fullText: () => Promise<string | undefined>}> {
@@ -354,15 +394,17 @@ export class AssistantDO extends DurableObject<Env> {
         }
     }
 
-    async askAssistantAI(question: string): Promise<{stream: ReadableStream; fullText: () => Promise<string | undefined>}> {
+    async askAssistantAI(question: string, filesData = ""): Promise<{stream: ReadableStream; fullText: () => Promise<string | undefined>}> {
         const responseStream = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
             messages: [
-                {role: "system", content: this.getAssistantSystemPrompt()},
+                {role: "system", content: this.getAssistantSystemPrompt(filesData)},
                 ...this.getChatHistoryFormatted(AssistantDO.CHAT_HISTORY_LENGTH),
                 {role: "user", content: question}
             ],
             stream: true
         });
+
+        console.log("CONTEXTO DA AI: " + this.getAssistantSystemPrompt(filesData));
 
         const [clientStream, internalStream] = responseStream.tee();
         const reader = internalStream.getReader();
@@ -439,25 +481,55 @@ export class AssistantDO extends DurableObject<Env> {
             return new Response("Context Added", { status: 200 });
         }
 
+        if (request.method === "POST" && new URL(request.url).pathname === "/file_request") {
+            console.log("HANDLE file aproval");
+            const sessionId = await request.headers.get("x-session-id");
+            if (sessionId == null) return new Response("Null ID Session", {status: 500});
+            const requestResponseRaw = JSON.parse(await request.text());
+            if (requestResponseRaw.result) {
+                console.log(requestResponseRaw.files);
+                const {stream, fullText} = await this.askAssistantAI(requestResponseRaw.requestedText, requestResponseRaw.filesData);
+
+                fullText().then(async (finalAnswer) => {
+                    this.stateData.chatHistory.push({
+                        question: requestResponseRaw.requestedText,
+                        answer: finalAnswer ?? ""
+                    });
+                    await this.state.storage.put("stateData", this.stateData);
+                    DB.createMessage(this.env, sessionId, "assistant", finalAnswer ?? "")
+                    console.log(this.getChatHistoryFormatted(3));
+                })
+                
+                return new Response(stream, {
+                    headers: { "content-type": "text/event-stream" },
+                });
+            } else {
+                const {stream, fullText} = await this.askSettingFeedbackerAI(JSON.stringify(requestResponseRaw));
+                
+                fullText().then(async (finalAnswer) => {
+                    this.stateData.chatHistory.push({
+                        question: requestedText,
+                        answer: finalAnswer ?? ""
+                    });
+                    await this.state.storage.put("stateData", this.stateData);
+                    DB.createMessage(this.env, sessionId, "assistant", finalAnswer ?? "")
+                    console.log(this.getChatHistoryFormatted(3));
+                })
+                return new Response(stream, {
+                    headers: { "content-type": "text/event-stream" },
+                });
+            }
+        }
+
         const requestedText = await request.text();
         const sessionId = await request.headers.get("x-session-id");
-        ///// TEMP
-        if (requestedText === "reset") {
-            this.stateData = {
-                sessionName: "defaultName",
-                assistantName: "Rob",
-                languages: "python",
-                chatHistory: []
-            }
-            await this.state.storage.put("stateData", this.stateData);
-        }
-        //////
+
         if (!requestedText.toLowerCase().includes("hey " + this.stateData.assistantName.toLowerCase()) || sessionId == null) {
             return new Response(null, {status:204});
         }
-        
-        DB.createMessage(this.env, sessionId, "user", requestedText);
 
+        DB.createMessage(this.env, sessionId, "user", requestedText);
+        
         const settingAwnser = await this.askSettingsAI(requestedText);
         const settingFeedback = this.handleSettingResponse(settingAwnser);
 
@@ -465,6 +537,14 @@ export class AssistantDO extends DurableObject<Env> {
         console.log(settingFeedback);
 
         if (settingFeedback === "none") {
+            const response = await this.askContextCheckerAI(requestedText);
+            response.requestedText = requestedText;
+            console.log("Res: " + JSON.stringify(response));
+
+            if (response.decision === "needs_files") {
+                return new Response(JSON.stringify(response), {headers: { "content-type": "application/json" }});
+            }
+
             const {stream, fullText} = await this.askAssistantAI(requestedText);
 
             fullText().then(async (finalAnswer) => {
@@ -480,6 +560,7 @@ export class AssistantDO extends DurableObject<Env> {
             return new Response(stream, {
                 headers: { "content-type": "text/event-stream" },
             });
+
         } else {
             const stringFeedback = JSON.stringify(settingFeedback);
             const questionToFeedbacker = "User message:" + requestedText + "\n Analyzer output: " + stringFeedback;
