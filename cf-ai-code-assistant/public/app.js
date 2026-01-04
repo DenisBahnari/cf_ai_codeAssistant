@@ -153,7 +153,7 @@ async function loadMessages(sessionId) {
 async function clearHistory() {
   if (!confirm("Clear all messages in this session?")) return;
 
-  await api("/all_messages", {
+  const res = await api("/all_messages", {
     method: "DELETE",
     headers: {
       "x-session-id": currentSessionId

@@ -96,116 +96,232 @@ export class AssistantDO extends DurableObject<Env> {
     `
 
     private static readonly SETTING_ANALYSER_FEEDBACK_SYSTEM = `
-        You are a feedback agent for a coding assistant.
+    You are a feedback agent for a coding assistant.
 
-        You receive:
-        - The original user message
-        - The JSON output from a previous analyzer (settings analyzer or file-permission analyzer)
+    You receive:
+    - The original user message
+    - The JSON output from a previous analyzer (settings analyzer or file-permission analyzer)
 
-        Your job is to give short, friendly, human feedback explaining what happened.
+    Your job is to give short, friendly, human feedback explaining what happened.
 
-        You ONLY respond in cases where:
-        - A setting was changed
-        - A setting change is incomplete
-        - A request cannot be answered due to missing file permissions
+    You ONLY respond in cases where:
+    - A setting was changed
+    - A setting change is incomplete
+    - A request cannot be answered due to missing file permissions
 
-        Rules:
+    Rules:
 
-        SETTINGS FEEDBACK
-        1. If action is "set_name":
-        - Confirm the assistant name was updated.
-        2. If action is "set_language":
-        - Confirm the programming language was updated.
-        3. If action is "incomplete":
-        - Politely ask the user for the missing information.
+    SETTINGS FEEDBACK
+    1. If action is "set_name":
+    - Confirm the assistant name was updated.
+    2. If action is "set_language":
+    - Confirm the programming language was updated.
+    3. If action is "incomplete":
+    - Politely ask the user for the missing information.
 
-        FILE PERMISSION FEEDBACK
-        5. If decision is "needs_files" AND result is false:
-        - Clearly explain that the request cannot be answered without access to the requested files.
-        - Mention the file names if provided.
-        - Do NOT blame the user.
-        - Do NOT mention internal analysis, JSON, or decisions.
+    FILE PERMISSION FEEDBACK
+    5. If decision is "needs_files" AND result is false:
+    - Clearly explain that the request cannot be answered without access to the requested files.
+    - Mention the file names if provided.
+    - Do NOT blame the user.
+    - Do NOT mention internal analysis, JSON, or decisions.
 
-        Tone:
-        - Friendly
-        - Very short
-        - Natural
-        - Conversational
+    Tone:
+    - Friendly
+    - Very short
+    - Natural
+    - Conversational
 
-        Constraints:
-        - One sentence whenever possible
-        - No technical jargon
-        - No explanations of internal logic
-        - No emojis
+    Constraints:
+    - One sentence whenever possible
+    - No technical jargon
+    - No explanations of internal logic
+    - No emojis
 
-        Examples:
+    Examples:
 
-        Input:
-        Analyzer output:
-        { "action": "set_name", "value": "Albert" }
+    Input:
+    Analyzer output:
+    { "action": "set_name", "value": "Albert" }
 
-        Response:
-        All set! You can call me Albert now.
+    Response:
+    All set! You can call me Albert now.
 
-        ---
+    ---
 
-        Input:
-        Analyzer output:
-        { "action": "incomplete", "value": null }
+    Input:
+    Analyzer output:
+    { "action": "incomplete", "value": null }
 
-        Response:
-        Sure! What would you like to change exactly?
+    Response:
+    Sure! What would you like to change exactly?
 
-        ---
+    ---
 
-        Input:
-        Analyzer output:
-        {
-        "decision": "needs_files",
-        "reason": "Unable to quality check your app without access to the project files",
-        "files": ["src/app.py"],
-        "result": false
-        }
+    Input:
+    Analyzer output:
+    {
+    "decision": "needs_files",
+    "reason": "Unable to quality check your app without access to the project files",
+    "files": ["src/app.py"],
+    "result": false
+    }
 
-        Response:
-        I can not quality check your app without access to src/app.py.
+    Response:
+    I can not quality check your app without access to src/app.py.
 
-        ---
+    ---
 
-        Your response must ONLY be the final message shown to the user.
-        `;
+    Your response must ONLY be the final message shown to the user.
+    `;
+
+    
+    private static readonly PROJECT_FOLDER_FILTER_SYSTEM = `
+    You are a folder relevance filter for a coding assistant.
+
+    Your task is to analyze a list of folder paths from a software project and return ONLY the folders that are useful to understand the project structure and intent.
+
+    Goal:
+        Reduce noise and token usage by keeping only folders that help an AI understand:
+        - application logic
+        - configuration
+        - public assets
+        - data inputs (csv, json, etc.)
+
+    Keep folders that usually contain:
+        - source code (e.g. src, app, server, lib)
+        - public or static assets (e.g. public, assets)
+        - configuration (e.g. config, configs)
+        - data or datasets (e.g. data, datasets)
+
+    Ignore folders that are:
+        - hidden or system folders (start with ".")
+        - tooling or runtime state (e.g. .wrangler, .git, .vscode)
+        - cache, temp, build, dist, node_modules, vendor
+        - deeply nested internal state folders
+
+    Rules:
+        1. Prefer high-level meaningful folders over deep technical internals.
+        2. If a parent folder is useful, do NOT include its subfolders unless they add new meaning.
+        3. Never include folders starting with ".".
+        4. Be conservative: include only what helps understand the project at a glance.
+
+    Input format:
+        An array of folder paths (strings).
+
+    Output format:
+        Return ONLY a valid JSON array of selected folder paths.
+        Do NOT explain anything.
+        Do NOT add extra text.
+
+    Example:
+
+    Input:
+        [
+        ".wrangler",
+        "src",
+        "public",
+        "public/assets",
+        ".vscode"
+        ]
+
+    Output:
+        [
+        "src",
+        "public"
+        ]
+    `;
+
 
 
     private getContextEvaluatorPrompt(): string {
-    return `
-    You are a request evaluator for a coding assistant.
+  return `
+    You are a context-decision evaluator for a coding assistant.
 
-    Your job is to decide whether the user's question can be answered WITHOUT reading any project files.
+    Your job is ONLY to decide whether answering the user's question
+    requires access to project files. You DO NOT answer the user's question.
+    You only decide if file inspection is needed to answer accurately.
 
     You are given:
-        - The user question
-        - The recent chat history
-        - A high-level project structure (paths only)
+        - The user's question
+        - Recent chat history
+        - A high-level project structure (paths only, no file contents)
 
     Respond ONLY in JSON.
 
     Schema:
     {
-        "decision": "answer" | "needs_files",
-        "reason": "<short explanation>",
-        "files": ["path/to/file"] | []
+    "decision": "needs_files" | "answer_possible",
+    "reason": "<short explanation>",
+    "files": ["path/to/file"] | []
     }
 
-    Rules:
-        - If unsure, choose "needs_files"
-        - Request the MINIMUM number of files
-        - Never guess file contents
-        - Never explain outside JSON
-    
+    Decision rules:
+
+    1. Choose "needs_files" if:
+        - The question depends on project-specific code, configuration, or data.
+        - The question references "my app", "this bug", "this code", or other implicit project context.
+        - Answering would require inspecting files to avoid guessing.
+        - There is any ambiguity about missing context.
+
+    2. Choose "answer_possible" ONLY if:
+        - The question is fully conceptual, theoretical, or general.
+        - You can determine that the user's question can be answered without reading any project files.
+
+    File selection rules (if "needs_files"):
+        - Request the MINIMUM number of files.
+        - Prefer main source files (e.g., src/app.py, src/main.py, server files).
+        - Only request files that exist in the provided project structure.
+        - Never request entire folders, only individual files.
+
+    Strict rules:
+        - Never answer the user's question yourself.
+        - Never invent code, file contents, or behavior.
+        - Do not request files not present in the project structure.
+        - If unsure, always choose "needs_files".
+        - Respond only in JSON, no extra text.
+
+    EXAMPLES:
+
+    User: "Hey Rob, I have a bug where it gives me a null pointer in my app"
+    Project structure: src/app.py
+
+    Output:
+    {
+    "decision": "needs_files",
+    "reason": "Bug depends on project implementation",
+    "files": ["src/app.py"]
+    }
+
+    ---
+
+    User: "What is a NullPointerException in Python?"
+
+    Output:
+    {
+    "decision": "answer_possible",
+    "reason": "This is a general language question",
+    "files": []
+    }
+
+    ---
+
+    User: "How can I fix my login code? It crashes when I submit the form."
+    Project structure: src/login.py, src/main.py, public/index.html
+
+    Output:
+    {
+    "decision": "needs_files",
+    "reason": "Debugging requires inspecting project files",
+    "files": ["src/login.py"]
+    }
+
+    In all these example it is implicit that you know the project structure and those files exists, YOU NEVER IVENT FILES.
+
     ${this.getProjectContextBlock()}
-
-    `
+    `;
     }
+
 
 
     private getAssistantSystemPrompt(filesData = ""): string {
@@ -313,7 +429,25 @@ export class AssistantDO extends DurableObject<Env> {
 
     }
 
+    async askFolderFilterAI(question: string): Promise<any> {
+        const response = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
+            messages: [
+                {role:"system", content: AssistantDO.PROJECT_FOLDER_FILTER_SYSTEM},
+                {role:"user", content: question}
+            ]
+        });
+        try {
+            const responseJson = JSON.parse(response.response ?? "");
+            return responseJson;
+        } catch (err) {
+            console.error("Failed to parse setting intent:", response.response ?? "");
+            return [];
+        }
+    }
+
     async askContextCheckerAI(question: string): Promise<any> {
+        console.log("Contexto NeedsFilesChecker: " + this.getContextEvaluatorPrompt())
+
         const response = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
             messages: [
                 {role:"system", content: this.getContextEvaluatorPrompt()},
@@ -395,6 +529,8 @@ export class AssistantDO extends DurableObject<Env> {
     }
 
     async askAssistantAI(question: string, filesData = ""): Promise<{stream: ReadableStream; fullText: () => Promise<string | undefined>}> {
+        console.log("CONTEXTO DA AI: " + this.getAssistantSystemPrompt(filesData));
+
         const responseStream = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
             messages: [
                 {role: "system", content: this.getAssistantSystemPrompt(filesData)},
@@ -403,8 +539,6 @@ export class AssistantDO extends DurableObject<Env> {
             ],
             stream: true
         });
-
-        console.log("CONTEXTO DA AI: " + this.getAssistantSystemPrompt(filesData));
 
         const [clientStream, internalStream] = responseStream.tee();
         const reader = internalStream.getReader();
@@ -460,26 +594,42 @@ export class AssistantDO extends DurableObject<Env> {
 
         if (request.method === "POST" && new URL(request.url).pathname === "/project_context") {
             console.log("ADD Project Context");
-			const projectContextRaw = JSON.parse(await request.text());
+
+            const projectContextRaw = JSON.parse(await request.text());
+
+            const projectFolders: string[] = projectContextRaw.tree
+                .filter((entry: { type: string }) => entry.type === "dir")
+                .map((entry: { path: string }) => entry.path);
+
+            const validFoldersRaw = await this.askFolderFilterAI(
+                JSON.stringify(projectFolders)
+            );
+
+            const validFolders: string[] = Array.isArray(validFoldersRaw)
+                ? validFoldersRaw
+                : [];
+
             const rootName = projectContextRaw.rootName;
             const treeRaw = projectContextRaw.tree;
-            let tree: FileNode[] = [];
-            treeRaw.forEach((element: { path: any; type: any; }) => {
-                const node: FileNode = {
-                    path: element.path,
-                    type: element.type
-                }
-                tree.push(node);
-            });
+
+            const tree: FileNode[] = treeRaw.filter(
+                (element: { path: string; type: string }) =>
+                element.type === "file" &&
+                this.isFileInValidFolder(element.path, validFolders)
+            );
+
             const projectContext = {
-                rootName: rootName,
-                tree: tree,
-                allowedFiles: []
-            }
+                rootName,
+                tree,
+            };
+
             this.stateData.projetoContext = projectContext;
             await this.state.storage.put("stateData", this.stateData);
+
             return new Response("Context Added", { status: 200 });
         }
+
+
 
         if (request.method === "POST" && new URL(request.url).pathname === "/file_request") {
             console.log("HANDLE file aproval");
@@ -487,7 +637,6 @@ export class AssistantDO extends DurableObject<Env> {
             if (sessionId == null) return new Response("Null ID Session", {status: 500});
             const requestResponseRaw = JSON.parse(await request.text());
             if (requestResponseRaw.result) {
-                console.log(requestResponseRaw.files);
                 const {stream, fullText} = await this.askAssistantAI(requestResponseRaw.requestedText, requestResponseRaw.filesData);
 
                 fullText().then(async (finalAnswer) => {
@@ -497,7 +646,7 @@ export class AssistantDO extends DurableObject<Env> {
                     });
                     await this.state.storage.put("stateData", this.stateData);
                     DB.createMessage(this.env, sessionId, "assistant", finalAnswer ?? "")
-                    console.log(this.getChatHistoryFormatted(3));
+                    console.log(this.getChatHistoryFormatted(5));
                 })
                 
                 return new Response(stream, {
@@ -513,7 +662,7 @@ export class AssistantDO extends DurableObject<Env> {
                     });
                     await this.state.storage.put("stateData", this.stateData);
                     DB.createMessage(this.env, sessionId, "assistant", finalAnswer ?? "")
-                    console.log(this.getChatHistoryFormatted(3));
+                    console.log(this.getChatHistoryFormatted(5));
                 })
                 return new Response(stream, {
                     headers: { "content-type": "text/event-stream" },
@@ -534,7 +683,6 @@ export class AssistantDO extends DurableObject<Env> {
         const settingFeedback = this.handleSettingResponse(settingAwnser);
 
         console.log(settingAwnser);
-        console.log(settingFeedback);
 
         if (settingFeedback === "none") {
             const response = await this.askContextCheckerAI(requestedText);
@@ -554,7 +702,7 @@ export class AssistantDO extends DurableObject<Env> {
                 });
                 await this.state.storage.put("stateData", this.stateData);
                 DB.createMessage(this.env, sessionId, "assistant", finalAnswer ?? "")
-                console.log(this.getChatHistoryFormatted(3));
+                console.log(this.getChatHistoryFormatted(5));
             })
             
             return new Response(stream, {
@@ -573,7 +721,7 @@ export class AssistantDO extends DurableObject<Env> {
                 });
                 await this.state.storage.put("stateData", this.stateData);
                 DB.createMessage(this.env, sessionId, "assistant", finalAnswer ?? "")
-                console.log(this.getChatHistoryFormatted(3));
+                console.log(this.getChatHistoryFormatted(5));
             })
 
             return new Response(stream, {
@@ -613,5 +761,12 @@ export class AssistantDO extends DurableObject<Env> {
         }
         return feedback;
     }
+
+    private isFileInValidFolder(filePath: string, validFolders: string[]) {
+        return validFolders.some(folder =>
+            filePath === folder || filePath.startsWith(folder + "/")
+        );
+    }
+
 
 }

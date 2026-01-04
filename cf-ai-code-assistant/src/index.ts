@@ -77,7 +77,7 @@ export default {
 				const response = await DB.deleteAllMessages(env, sessionId);
 				const id = env.MY_DURABLE_OBJECT.idFromName(sessionId);
 				const stub = env.MY_DURABLE_OBJECT.get(id);
-				await stub.fetch(request);
+				const res = await stub.fetch(request);
 				if (response.status === "success") {
 					return new Response(response.messageId);
 				} else {
