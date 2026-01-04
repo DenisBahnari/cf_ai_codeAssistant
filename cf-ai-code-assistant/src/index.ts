@@ -111,6 +111,17 @@ export default {
 			}
 		}
 
+		if (request.method === "GET" && url.pathname == "/agent_status") {
+			const sessionId = await request.headers.get("x-session-id");
+			if (sessionId != null) {
+				const id = env.MY_DURABLE_OBJECT.idFromName(sessionId);
+				const stub = env.MY_DURABLE_OBJECT.get(id);
+				return await stub.fetch(request);
+			} else {
+				return new Response("Null Session Id", {status: 500})
+			}
+		}
+
 		if (request.method === "POST" && url.pathname === "/chat") {
 			const sessionId = await request.headers.get("x-session-id");
 			if (sessionId != null) {
