@@ -167,6 +167,7 @@ async function clearHistory() {
 
 async function pickProjectFolder() {
   const handle = await window.showDirectoryPicker();
+  await saveHandle(currentSessionId, handle);
   const entries = await buildTree(handle);
   const bodyInfo = {
     "rootName": handle.name,
@@ -222,6 +223,19 @@ async function sendMessage() {
     body: text
   });
 
+  if (res.headers.get("content-type")?.includes("application/json")) {
+    const data = await res.json();
+    console.log(data);
+    if (data.decision === "needs_files") {
+          renderAskFileAprove(data);
+    }
+  } else {
+    await renderStream(chat, res);
+  }
+
+}
+
+async function renderStream(chat, res) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
 
@@ -255,6 +269,93 @@ async function sendMessage() {
     }
   }
 }
+
+function renderAskFileAprove(data) {
+  app.innerHTML = `
+    <div class="file_request">
+      <h1>Aproval Request: ${ data.reason } Files needed: ${ data.files } </h1>
+      <div style="margin-top:12px">
+        <button id="aprove_file_button">Aprove</button>
+        <button class="secondary" id="cancel_file_button">Cancel</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("cancel_file_button").onclick = async () => {
+    openSession(currentSessionId);
+    const chat = document.getElementById("chat");
+    data.result = false;
+    const res = await api("/file_request", {
+      method: "POST",
+      headers: {
+        "x-session-id": currentSessionId
+      },
+      body: JSON.stringify(data)
+    });
+    await renderStream(chat, res);
+  }
+ 
+  document.getElementById("aprove_file_button").onclick = async () => {
+    openSession(currentSessionId);
+    const chat = document.getElementById("chat");
+    let filesData = `
+    PROJECT FILE CONTEXT (user-approved):
+    `;
+    for (let file of data.files) {
+      let fileContent = await readFile(file);
+      filesData += `
+        File: ${file}
+        --------------------------------
+        ${fileContent}
+        --------------------------------  
+      `;
+    }
+    filesData += `
+      Rules:
+      - This is the real file content
+      - Do not assume other files
+    `;
+    console.log(filesData);
+    data.result = true;
+    data.filesData = filesData;
+    const res = await api("/file_request", {
+      method: "POST",
+      headers: {
+        "x-session-id": currentSessionId
+      },
+      body: JSON.stringify(data)
+    });
+    await renderStream(chat, res);
+  };
+}
+
+async function readFile(filePath) {
+  const dirHandle = await loadHandle(currentSessionId);
+  if (!dirHandle) {
+    throw new Error("No directory selected for this session");
+  }
+
+  console.log(dirHandle);
+  console.log(filePath);
+
+  const perm = await dirHandle.queryPermission({ mode: "read" });
+  if (perm !== "granted") {
+    await dirHandle.requestPermission({ mode: "read" });
+  }
+
+  const parts = filePath.split("/");
+  let current = dirHandle;
+
+  for (const part of parts.slice(0, -1)) {
+    current = await current.getDirectoryHandle(part);
+  }
+
+  const fileHandle = await current.getFileHandle(parts.at(-1));
+  const file = await fileHandle.getFile();
+  return await file.text();
+}
+
+
 
 // ######### Streaming Message #########
 
@@ -321,6 +422,50 @@ async function renderMic() {
   });
 }
 // ####### Speech Detection #######
+
+
+// ####### FileHandle DB #######
+
+async function saveHandle(sessionId, handle) {
+  const db = await openDB();
+  const tx = db.transaction("handles", "readwrite");
+  tx.objectStore("handles").put(handle, sessionId);
+  await tx.done;
+}
+
+async function loadHandle(sessionId) {
+  const db = await openDB();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("handles", "readonly");
+    const store = tx.objectStore("handles");
+    const request = store.get(sessionId);
+
+    request.onsuccess = () => {
+      resolve(request.result); 
+    };
+
+    request.onerror = () => {
+      reject(request.error);
+    };
+  });
+}
+
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("fs-handles", 1);
+
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore("handles");
+    };
+
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// ####### FileHandle DB #######
 
 
 renderSessions();
