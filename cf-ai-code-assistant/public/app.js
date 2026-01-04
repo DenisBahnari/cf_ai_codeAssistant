@@ -105,16 +105,20 @@ async function openSession(sessionId) {
   currentSessionId = sessionId;
 
   app.innerHTML = `
-    <div id="chat"></div>
-    <div id="inputBar">
-      <input id="question" placeholder="Hey Rob..." />
-      <button id="send">Send</button>
-      <button id="micBtn">🎤</button>
-      <button id="selectFolder"> SelectFolder</button>
-      <button id="clear">🧹</button>
-      <button id="back">←</button>
-    </div>
-  `;
+  <div id="chat"></div>
+  <div id="inputBar">
+    <input id="question" placeholder="Hey Rob..." />
+    <button id="send">Send</button>
+    <button id="micBtn" class="mic-button">
+      <img src="assets/mic_icon.png" alt="Microphone" class="mic-icon" />
+    </button>
+    <button id="selectFolder">
+      <img src="assets/folder_icon.png" alt="Folder" class="folder-icon" />
+    </button>
+    <button id="clear">Clear Chat</button>
+    <button id="back">Back</button>
+  </div>
+`;
 
   renderMic();
 
@@ -354,23 +358,22 @@ async function readFile(filePath) {
   const file = await fileHandle.getFile();
   return await file.text();
 }
-
-
-
 // ######### Streaming Message #########
 
 
 // ####### Speech Detection #######
-
 async function renderMic() {
   const micBtn = document.getElementById("micBtn");
-
   let listening = false;
   let finalTranscript = "";
+  
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  
+  // Verificar suporte
   if (!SpeechRecognition) {
-      micBtn.disabled = true;
-      micBtn.textContent = "🎤 not supported";
+    micBtn.disabled = true;
+    micBtn.title = "Speech recognition not supported in your browser";
+    return;
   }
 
   const recognition = new SpeechRecognition();
@@ -380,46 +383,92 @@ async function renderMic() {
 
   recognition.onresult = (event) => {
     let interim = "";
+    const input = document.getElementById("question");
 
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const t = event.results[i][0].transcript;
-      if (event.results[i].isFinal) finalTranscript += t;
-      else interim += t;
+      if (event.results[i].isFinal) {
+        finalTranscript += t;
+      } else {
+        interim += t;
+      }
     }
 
+    // Atualiza o input com o texto reconhecido
     input.value = finalTranscript + interim;
+    
+    // Rola para o final do texto
+    input.scrollLeft = input.scrollWidth;
   };
 
   recognition.onend = () => {
-    if (listening) recognition.start();
+    // Se ainda estiver escutando, reinicia
+    if (listening) {
+      setTimeout(() => {
+        if (listening) {
+          recognition.start();
+        }
+      }, 100);
+    }
   };
 
   recognition.onspeechend = () => {
     recognition.stop();
     listening = false;
-    micBtn.textContent = "🎤";
-
+    micBtn.classList.remove("listening");
+    
+    const input = document.getElementById("question");
+    
+    // Se tem texto reconhecido, envia a mensagem
     if (finalTranscript.trim()) {
-      sendMessage();
-      finalTranscript = "";
+      // Pequeno delay para dar feedback visual
+      setTimeout(() => {
+        sendMessage();
+      }, 300);
     }
+    
+    finalTranscript = "";
   };
 
-  recognition.onerror = () => {
-    micBtn.textContent = "🎤";
+  recognition.onerror = (event) => {
+    console.error("Speech recognition error:", event.error);
+    listening = false;
+    micBtn.classList.remove("listening");
+    
+    // Feedback visual de erro
+    micBtn.style.backgroundColor = "#FF4757";
+    setTimeout(() => {
+      micBtn.style.backgroundColor = "";
+    }, 1000);
   };
 
-  micBtn.addEventListener("click", () => {
-    if (listening) {
-      recognition.stop();
-      listening = false;
-      micBtn.textContent = "🎤";
-    } else {
-      recognition.start();
-      listening = true;
-      micBtn.textContent = "🎙️ Listening...";
+  micBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    
+    // Pedir permissão se necessário
+    try {
+      if (listening) {
+        // Parar gravação
+        recognition.stop();
+        listening = false;
+        micBtn.classList.remove("listening");
+      } else {
+        // Iniciar gravação
+        recognition.start();
+        listening = true;
+        micBtn.classList.add("listening");
+        
+        // Limpar texto anterior
+        finalTranscript = "";
+      }
+    } catch (error) {
+      console.error("Error with speech recognition:", error);
+      micBtn.disabled = true;
+      micBtn.title = "Microphone access denied";
     }
   });
+
+  micBtn.title = "Click to start voice input";
 }
 // ####### Speech Detection #######
 
