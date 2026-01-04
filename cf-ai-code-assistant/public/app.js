@@ -17,7 +17,7 @@ async function renderSessions() {
   app.innerHTML = `
     <div class="sessions">
       <h1>Sessions</h1>
-      <button id="newSession">+ New Session</button>
+      <button id="newSession">New Session</button>
       <div id="list"></div>
     </div>
   `;
