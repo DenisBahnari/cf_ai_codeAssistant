@@ -592,6 +592,16 @@ export class AssistantDO extends DurableObject<Env> {
             return new Response("Chat Destroyed", { status: 200 });
         }
 
+        if (request.method === "GET" && new URL(request.url).pathname === "/agent_status") {
+            console.log("GET Agent Status");
+            const session = await DB.getSession(this.env, request.headers.get("x-session-id")!)
+            const sessinString = JSON.stringify(session);
+            const sessionName = JSON.parse(sessinString).session.session_name;
+            this.stateData.sessionName = sessionName;
+            await this.state.storage.put("stateData", this.stateData);
+            return new Response(JSON.stringify(this.stateData), {status: 200})
+        }
+
         if (request.method === "POST" && new URL(request.url).pathname === "/project_context") {
             console.log("ADD Project Context");
 

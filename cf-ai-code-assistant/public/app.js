@@ -105,20 +105,60 @@ async function openSession(sessionId) {
   currentSessionId = sessionId;
 
   app.innerHTML = `
-  <div id="chat"></div>
-  <div id="inputBar">
-    <input id="question" placeholder="Hey Rob..." />
-    <button id="send">Send</button>
-    <button id="micBtn" class="mic-button">
-      <img src="assets/mic_icon.png" alt="Microphone" class="mic-icon" />
-    </button>
-    <button id="selectFolder">
-      <img src="assets/folder_icon.png" alt="Folder" class="folder-icon" />
-    </button>
-    <button id="clear">Clear Chat</button>
-    <button id="back">Back</button>
-  </div>
-`;
+    <div class="chat-layout">
+      <!-- Sidebar estática com informações -->
+      <div class="agent-sidebar">
+        <div class="sidebar-section">
+          <h3 class="sidebar-title">Session Info</h3>
+          <div class="info-grid">
+            <div class="info-item">
+              <span class="info-label">Session:</span>
+              <span id="sessionName" class="info-value">Loading...</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Assistant:</span>
+              <span id="assistantName" class="info-value">Loading...</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Language:</span>
+              <span id="assistantLanguage" class="info-value">Loading...</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Project:</span>
+              <span id="projectRoot" class="info-value">No project</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="project-header">
+            <h3 class="sidebar-title">Project Files</h3>
+            <span id="fileCount" class="file-count">0 files</span>
+          </div>
+          <div id="projectTree" class="file-tree">
+            <div class="tree-placeholder">No project selected</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Área do chat -->
+      <div class="chat-area">
+        <div id="chat" class="chat-messages"></div>
+        <div id="inputBar" class="input-bar">
+          <input id="question" placeholder="Hey Rob..." />
+          <button id="send">Send</button>
+          <button id="micBtn" class="mic-button">
+            <img src="assets/mic_icon.png" alt="Microphone" class="mic-icon" />
+          </button>
+          <button id="selectFolder">
+            <img src="assets/folder_icon.png" alt="Folder" class="folder-icon" />
+          </button>
+          <button id="clear">Clear</button>
+          <button id="back">Back</button>
+        </div>
+      </div>
+    </div>
+  `;
 
   renderMic();
 
@@ -127,7 +167,38 @@ async function openSession(sessionId) {
   document.getElementById("clear").onclick = clearHistory;
   document.getElementById("selectFolder").onclick = pickProjectFolder;
 
-  await loadMessages(sessionId);
+  await Promise.all([
+    loadMessages(sessionId),
+    loadAgentStatus(sessionId)
+  ]);
+}
+
+async function loadAgentStatus(sessionId) {
+  try {
+    const res = await api("/agent_status", {
+      method: "GET",
+      headers: {
+        "x-session-id": sessionId
+      }
+    });
+    
+    const agentData = await res.json();
+    
+    document.getElementById("sessionName").textContent = agentData.sessionName || "Unnamed";
+    document.getElementById("assistantName").textContent = agentData.assistantName || "Rob";
+    document.getElementById("assistantLanguage").textContent = agentData.languages || "Auto";
+    
+    if (agentData.projetoContext && agentData.projetoContext.rootName) {
+      document.getElementById("projectRoot").textContent = agentData.projetoContext.rootName;
+      renderFileTree(agentData.projetoContext.tree);
+    } else {
+      document.getElementById("projectRoot").textContent = "No project";
+      document.getElementById("projectTree").innerHTML = '<div class="tree-placeholder">Select a folder to load project</div>';
+    }
+    
+  } catch (error) {
+    console.error("Error loading agent status:", error);
+  }
 }
 
 
@@ -176,8 +247,8 @@ async function pickProjectFolder() {
   const bodyInfo = {
     "rootName": handle.name,
     "tree": entries,
-  }
-  console.log(bodyInfo);
+  };
+  
   await api("/project_context", {
     method: "POST",
     headers: {
@@ -185,6 +256,8 @@ async function pickProjectFolder() {
     },
     body: JSON.stringify(bodyInfo)
   });
+  
+  await loadAgentStatus(currentSessionId);
 }
 
 async function buildTree(dirHandle, base = "") {
@@ -203,7 +276,6 @@ async function buildTree(dirHandle, base = "") {
 
   return entries;
 }
-
 
 // ######### Chat #########
 
@@ -471,6 +543,120 @@ async function renderMic() {
   micBtn.title = "Click to start voice input";
 }
 // ####### Speech Detection #######
+
+
+// ####### Files Render #######
+function renderFileTree(tree) {
+  const container = document.getElementById("projectTree");
+  
+  if (!tree || tree.length === 0) {
+    container.innerHTML = '<div class="tree-placeholder">No files in project</div>';
+    document.getElementById("fileCount").textContent = "0 files";
+    return;
+  }
+  
+  // Organizar árvore hierárquica
+  const fileTree = buildHierarchy(tree);
+  const fileCount = tree.filter(item => item.type === "file").length;
+  
+  document.getElementById("fileCount").textContent = `${fileCount} file${fileCount !== 1 ? 's' : ''}`;
+  
+  let html = '<div class="tree-container">';
+  html += renderTreeNodes(fileTree);
+  html += '</div>';
+  
+  container.innerHTML = html;
+  
+  // Adicionar eventos de clique para pastas
+  document.querySelectorAll('.folder-node').forEach(folder => {
+    folder.addEventListener('click', function(e) {
+      if (!e.target.closest('.folder-toggle')) return;
+      const children = this.nextElementSibling;
+      const toggle = this.querySelector('.folder-toggle');
+      
+      if (children.classList.contains('expanded')) {
+        children.classList.remove('expanded');
+        toggle.textContent = '▶';
+      } else {
+        children.classList.add('expanded');
+        toggle.textContent = '▼';
+      }
+    });
+  });
+}
+
+function buildHierarchy(items) {
+  const root = {};
+  
+  items.forEach(item => {
+    const parts = item.path.split('/');
+    let current = root;
+    
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const isLast = i === parts.length - 1;
+      
+      if (!current[part]) {
+        current[part] = isLast 
+          ? { type: item.type }
+          : { type: 'dir', children: {} };
+      }
+      
+      if (!isLast) {
+        current = current[part].children;
+      }
+    }
+  });
+  
+  return root;
+}
+
+function renderTreeNodes(node, level = 0) {
+  let html = '';
+  const entries = Object.entries(node).sort((a, b) => {
+    // Pastas primeiro, depois arquivos
+    if (a[1].type === 'dir' && b[1].type !== 'dir') return -1;
+    if (a[1].type !== 'dir' && b[1].type === 'dir') return 1;
+    return a[0].localeCompare(b[0]);
+  });
+  
+  entries.forEach(([name, data]) => {
+    const indent = '  '.repeat(level);
+    const isDir = data.type === 'dir';
+    
+    if (isDir) {
+      html += `
+        <div class="folder-node" style="padding-left: ${level * 16}px">
+          <span class="folder-toggle">▶</span>
+          <span class="folder-icon">📁</span>
+          <span class="node-name">${name}</span>
+        </div>
+        <div class="folder-children">
+          ${renderTreeNodes(data.children, level + 1)}
+        </div>
+      `;
+    } else {
+      // Icones por tipo de arquivo
+      let icon = '📄';
+      if (name.endsWith('.py')) icon = '🐍';
+      else if (name.endsWith('.js')) icon = '📜';
+      else if (name.endsWith('.html')) icon = '🌐';
+      else if (name.endsWith('.css')) icon = '🎨';
+      else if (name.endsWith('.json')) icon = '📋';
+      else if (name.endsWith('.md')) icon = '📝';
+      
+      html += `
+        <div class="file-node" style="padding-left: ${level * 16 + 20}px" title="${name}">
+          <span class="file-icon">${icon}</span>
+          <span class="node-name">${name}</span>
+        </div>
+      `;
+    }
+  });
+  
+  return html;
+}
+// ####### Files Render #######
 
 
 // ####### FileHandle DB #######
