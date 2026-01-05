@@ -626,8 +626,8 @@ body {
 }
 
 .code-block.partial {
-  background: #1E293B;
-  border: 1px solid #334155;
+  background: var(--bg-light);
+  border: 1px solid #c9520d;
   border-radius: var(--radius-sm);
   padding: 1rem;
   margin: 1rem 0;
@@ -640,7 +640,7 @@ body {
 }
 
 .code-block.partial code {
-  color: #E2E8F0;
+  color: #000000;
 }
 
 .code-block pre::-webkit-scrollbar {
