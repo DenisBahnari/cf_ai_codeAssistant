@@ -235,92 +235,100 @@ export class AssistantDO extends DurableObject<Env> {
 
 
     private getContextEvaluatorPrompt(): string {
-  return `
-    You are a context-decision evaluator for a coding assistant.
+    return `
+    OUTPUT CONTRACT (READ CAREFULLY):
 
-    Your job is ONLY to decide whether answering the user's question
-    requires access to project files. You DO NOT answer the user's question.
-    You only decide if file inspection is needed to answer accurately.
+    You MUST output ONLY a valid JSON object.
+    If you output ANY text before or after the JSON, the response is INVALID.
+    Do NOT explain.
+    Do NOT introduce yourself.
+    Do NOT restate the task.
+    Do NOT use natural language outside JSON.
 
-    You are given:
-        - The user's question
-        - Recent chat history
-        - A high-level project structure (paths only, no file contents)
+    ----------------------------------------
+    TASK:
 
-    Respond ONLY in JSON.
+    Decide whether answering the user's question REQUIRES reading project files.
 
-    Schema:
+    You DO NOT answer the question.
+    You ONLY decide if files are required.
+
+    ----------------------------------------
+    ALLOWED OUTPUT (EXACT SCHEMA):
+
     {
     "decision": "needs_files" | "answer_possible",
-    "reason": "<short explanation>",
-    "files": ["path/to/file"] | []
+    "reason": "<short technical reason>",
+    "files": ["existing/file/path"] | []
     }
 
-    Decision rules:
+    ----------------------------------------
+    DECISION RULES:
 
-    1. Choose "needs_files" if:
-        - The question depends on project-specific code, configuration, or data.
-        - The question references "my app", "this bug", "this code", or other implicit project context.
-        - Answering would require inspecting files to avoid guessing.
-        - There is any ambiguity about missing context.
+    Return "needs_files" if:
+    - The question refers to bugs, crashes, errors, or unexpected behavior
+    - The question refers to "my app", "this project", or implicit project context
+    - The answer depends on how THIS project is implemented
+    - There is ANY missing context
+    - You would need to inspect code to avoid guessing
 
-    2. Choose "answer_possible" ONLY if:
-        - The question is fully conceptual, theoretical, or general.
-        - You can determine that the user's question can be answered without reading any project files.
+    Return "answer_possible" ONLY if:
+    - The question is purely conceptual or theoretical
+    - The answer does NOT depend on this project
+    - NO project-specific behavior is required
 
-    File selection rules (if "needs_files"):
-        - Request the MINIMUM number of files.
-        - Prefer main source files (e.g., src/app.py, src/main.py, server files).
-        - Only request files that exist in the provided project structure.
-        - Never request entire folders, only individual files.
+    If uncertain → "needs_files".
 
-    Strict rules:
-        - Never answer the user's question yourself.
-        - Never invent code, file contents, or behavior.
-        - Do not request files not present in the project structure.
-        - If unsure, always choose "needs_files".
-        - Respond only in JSON, no extra text.
+    ----------------------------------------
+    FILE RULES (CRITICAL):
 
-    EXAMPLES:
+    - You may ONLY reference files that EXIST in the provided project structure
+    - You may NEVER invent file names
+    - You may NEVER guess file paths
+    - Request the MINIMUM number of files
+    - NEVER request folders
+    - If no specific file is clearly required, request ONE main file only
 
-    User: "Hey Rob, I have a bug where it gives me a null pointer in my app"
+    ----------------------------------------
+    ABSOLUTE PROHIBITIONS:
+
+    - NO text outside JSON
+    - NO explanations
+    - NO apologies
+    - NO role descriptions
+    - NO markdown
+    - NO invented files
+
+    ----------------------------------------
+    EXAMPLES (STRICT):
+
+    User: "My app crashes with a null pointer"
     Project structure: src/app.py
 
-    Output:
     {
     "decision": "needs_files",
-    "reason": "Bug depends on project implementation",
+    "reason": "Project-specific bug",
     "files": ["src/app.py"]
     }
 
     ---
 
-    User: "What is a NullPointerException in Python?"
+    User: "What is a null pointer exception?"
 
-    Output:
     {
     "decision": "answer_possible",
-    "reason": "This is a general language question",
+    "reason": "General programming concept",
     "files": []
     }
 
-    ---
-
-    User: "How can I fix my login code? It crashes when I submit the form."
-    Project structure: src/login.py, src/main.py, public/index.html
-
-    Output:
-    {
-    "decision": "needs_files",
-    "reason": "Debugging requires inspecting project files",
-    "files": ["src/login.py"]
-    }
-
-    In all these example it is implicit that you know the project structure and those files exists, YOU NEVER IVENT FILES.
+    ----------------------------------------
+    PROJECT STRUCTURE (REFERENCE ONLY):
 
     ${this.getProjectContextBlock()}
     `;
     }
+
+
 
 
 
@@ -456,8 +464,9 @@ export class AssistantDO extends DurableObject<Env> {
             ]
         });
         try {
-            const jsonResponse = JSON.parse(response.response ?? "")
-            return jsonResponse;
+            const raw = response.response ?? "";
+            const parsed = this.extractJson(raw);
+            return parsed;
         } catch (err) {
             console.error("Failed to parse setting intent:", response.response ?? "");
             return { decision: "answer" };
@@ -684,7 +693,7 @@ export class AssistantDO extends DurableObject<Env> {
         const requestedText = await request.text();
         const sessionId = await request.headers.get("x-session-id");
 
-        if (!requestedText.toLowerCase().includes("hey " + this.stateData.assistantName.toLowerCase()) || sessionId == null) {
+        if (!requestedText.toLowerCase().includes(this.stateData.assistantName.toLowerCase()) || sessionId == null) {
             return new Response(null, {status:204});
         }
 
@@ -778,6 +787,19 @@ export class AssistantDO extends DurableObject<Env> {
             filePath === folder || filePath.startsWith(folder + "/")
         );
     }
+
+    private extractJson(raw: string): any {
+        const firstBrace = raw.indexOf("{");
+        const lastBrace = raw.lastIndexOf("}");
+
+        if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+            throw new Error("No valid JSON object found in model output");
+        }
+
+        const jsonString = raw.slice(firstBrace, lastBrace + 1);
+        return JSON.parse(jsonString);
+    }
+
 
 
 }
