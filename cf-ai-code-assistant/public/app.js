@@ -1,5 +1,6 @@
 const app = document.getElementById("app");
 let currentSessionId = null;
+let currentAgentName = "Rob";
 
 async function api(path, options = {}) {
   const res = await fetch(path, options);
@@ -19,6 +20,18 @@ async function renderSessions() {
       <h1>Sessions</h1>
       <button id="newSession">New Session</button>
       <div id="list"></div>
+    </div>
+    
+    <!-- Modal de confirmação (inicialmente escondido) -->
+    <div id="deleteModal" class="modal-overlay" style="display: none;">
+      <div class="modal-content">
+        <h3>Delete Session</h3>
+        <p id="modalMessage">Are you sure you want to delete this session?</p>
+        <div class="modal-buttons">
+          <button id="modalCancel" class="modal-btn modal-cancel">Cancel</button>
+          <button id="modalConfirm" class="modal-btn modal-confirm">Delete</button>
+        </div>
+      </div>
     </div>
   `;
 
@@ -40,17 +53,7 @@ async function renderSessions() {
 
     del.onclick = async (e) => {
       e.stopPropagation();
-      if (!confirm("Delete this session?")) return;
-
-      await api("/session", {
-        method: "DELETE",
-        headers: {
-          "x-session-id": s.id
-        },
-        body: s.id
-      });
-
-      renderSessions();
+      showDeleteModal(s.id, s.session_name ?? s.id);
     };
 
     div.appendChild(name);
@@ -58,8 +61,9 @@ async function renderSessions() {
     list.appendChild(div);
   });
 
-
   document.getElementById("newSession").onclick = renderCreateSession;
+  
+  setupModalEvents();
 }
 
 // ######### Render Sessions #########
@@ -93,6 +97,70 @@ function renderCreateSession() {
     const sessionId = await res.text();
     openSession(sessionId);
   };
+}
+
+
+let pendingDeleteSessionId = null;
+
+function showDeleteModal(sessionId, sessionName) {
+  pendingDeleteSessionId = sessionId;
+  
+  const modal = document.getElementById("deleteModal");
+  const message = document.getElementById("modalMessage");
+  
+  message.textContent = `Are you sure you want to delete session "${sessionName}"?`;
+  modal.style.display = "flex";
+}
+
+function hideDeleteModal() {
+  const modal = document.getElementById("deleteModal");
+  modal.style.display = "none";
+  pendingDeleteSessionId = null;
+}
+
+async function confirmDelete() {
+  if (!pendingDeleteSessionId) return;
+  
+  try {
+    await api("/session", {
+      method: "DELETE",
+      headers: {
+        "x-session-id": pendingDeleteSessionId
+      },
+      body: pendingDeleteSessionId
+    });
+    
+    hideDeleteModal();
+    renderSessions();
+  } catch (error) {
+    console.error("Failed to delete session:", error);
+    hideDeleteModal();
+    alert("Failed to delete session. Please try again.");
+  }
+}
+
+function setupModalEvents() {
+  const modal = document.getElementById("deleteModal");
+  const cancelBtn = document.getElementById("modalCancel");
+  const confirmBtn = document.getElementById("modalConfirm");
+  
+  if (!modal || !cancelBtn || !confirmBtn) return;
+  
+  cancelBtn.onclick = hideDeleteModal;
+  
+  confirmBtn.onclick = confirmDelete;
+  
+  modal.onclick = (e) => {
+    if (e.target === modal) {
+      hideDeleteModal();
+    }
+  };
+  
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.style.display === 'flex') {
+      hideDeleteModal();
+    }
+  });
 }
 
 
@@ -158,14 +226,30 @@ async function openSession(sessionId) {
         </div>
       </div>
     </div>
+    
+    <!-- Modal de confirmação (inicialmente escondido) -->
+    <div id="clearHistoryModal" class="modal-overlay" style="display: none;">
+      <div class="modal-content">
+        <div class="modal-icon">
+        </div>
+        <h3>Clear Chat History</h3>
+        <p id="clearHistoryMessage">Are you sure you want to clear all messages in this session?</p>
+        <div class="modal-buttons">
+          <button id="clearModalCancel" class="modal-btn modal-cancel">Cancel</button>
+          <button id="clearModalConfirm" class="modal-btn modal-confirm">Clear All</button>
+        </div>
+      </div>
+    </div>
   `;
 
   renderMic();
 
   document.getElementById("back").onclick = renderSessions;
   document.getElementById("send").onclick = sendMessage;
-  document.getElementById("clear").onclick = clearHistory;
+  document.getElementById("clear").onclick = showClearHistoryModal; 
   document.getElementById("selectFolder").onclick = pickProjectFolder;
+
+  setupClearHistoryModal();
 
   await Promise.all([
     loadMessages(sessionId),
@@ -187,6 +271,8 @@ async function loadAgentStatus(sessionId) {
     document.getElementById("sessionName").textContent = agentData.sessionName || "Unnamed";
     document.getElementById("assistantName").textContent = agentData.assistantName || "Rob";
     document.getElementById("assistantLanguage").textContent = agentData.languages || "Auto";
+
+    currentAgentName = agentData.assistantName || "Rob";
     
     if (agentData.projetoContext && agentData.projetoContext.rootName) {
       document.getElementById("projectRoot").textContent = agentData.projetoContext.rootName;
@@ -217,27 +303,151 @@ async function loadMessages(sessionId) {
   messages.forEach(m => {
     const div = document.createElement("div");
     div.className = `msg ${m.role_name === "user" ? "user" : "bot"}`;
-    div.textContent =
-      `${m.role_name === "user" ? "You" : "Rob"}: ${m.content}`;
+    
+    // Format message with code blocks
+    const formattedContent = formatMessageWithCode(m.content);
+    const senderName = m.role_name === "user" ? "You" : currentAgentName;
+    
+    div.innerHTML = `
+      <div class="message-content">${formattedContent}</div>
+    `;
+    
     chat.appendChild(div);
   });
 
   chat.scrollTop = chat.scrollHeight;
+  
 }
 
-async function clearHistory() {
-  if (!confirm("Clear all messages in this session?")) return;
+// ######### Format Code Functions #########
 
-  const res = await api("/all_messages", {
-    method: "DELETE",
-    headers: {
-      "x-session-id": currentSessionId
-    },
-    body: currentSessionId
+function formatMessageWithCode(text) {
+  if (!text) return '';
+   
+  let formatted = text;
+  
+  // "language\nCopy\ncode"
+  formatted = formatted.replace(/(\w+)\nCopy\n([\s\S]*?)(?=\n\n|\n$|$)/g, (match, language, code) => {
+    return `
+      <div class="code-block">
+        <pre><code>${escapeHtml(code.trim())}</code></pre>
+      </div>
+    `;
+  });
+  
+  // ```language\ncode\n```
+  formatted = formatted.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, language, code) => {
+    return `
+      <div class="code-block">
+        <pre><code>${escapeHtml(code.trim())}</code></pre>
+      </div>
+    `;
   });
 
-  document.getElementById("chat").innerHTML = "";
+  // br
+  formatted = formatted.replace(/\n/g, '<br>');
+  
+  // `código`
+  formatted = formatted.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+
+  //  **texto** 
+  formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  
+  // *texto* ou _texto_
+  formatted = formatted.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  formatted = formatted.replace(/_([^_]+)_/g, '<em>$1</em>');
+  
+  // 6. (*, -, •)
+  formatted = formatted.replace(/^\s*[-*•]\s+(.+)$/gm, '<li>$1</li>');
+  
+  
+  return formatted;
 }
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ######### Format Code Functions #########
+
+// ######### Chat #########
+
+async function clearHistory() {
+  try {
+    const res = await api("/all_messages", {
+      method: "DELETE",
+      headers: {
+        "x-session-id": currentSessionId
+      },
+      body: currentSessionId
+    });
+
+    document.getElementById("chat").innerHTML = "";
+    hideClearHistoryModal();
+    
+    const messageCount = document.getElementById("fileCount");
+    if (messageCount) {
+      messageCount.textContent = "0 files";
+    }
+    
+  } catch (error) {
+    console.error("Failed to clear history:", error);
+    hideClearHistoryModal();
+    alert("Failed to clear chat history. Please try again.");
+  }
+}
+
+// ######### Modal Functions for Clear History #########
+
+function showClearHistoryModal() {
+  const modal = document.getElementById("clearHistoryModal");
+  const message = document.getElementById("clearHistoryMessage");
+  
+  if (modal && message) {
+    modal.style.display = "flex";
+  }
+}
+
+function hideClearHistoryModal() {
+  const modal = document.getElementById("clearHistoryModal");
+  if (modal) {
+    modal.style.display = "none";
+  }
+}
+
+function setupClearHistoryModal() {
+  const modal = document.getElementById("clearHistoryModal");
+  const cancelBtn = document.getElementById("clearModalCancel");
+  const confirmBtn = document.getElementById("clearModalConfirm");
+  
+  if (!modal || !cancelBtn || !confirmBtn) return;
+  
+  cancelBtn.onclick = hideClearHistoryModal;
+  
+  confirmBtn.onclick = clearHistory;
+  
+  modal.onclick = (e) => {
+    if (e.target === modal) {
+      hideClearHistoryModal();
+    }
+  };
+  
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.style.display === 'flex') {
+      hideClearHistoryModal();
+    }
+  }, { once: true });
+  
+  modal.addEventListener('animationend', () => {
+    if (modal.style.display === 'none') {
+      document.removeEventListener('keydown', arguments.callee);
+    }
+  });
+}
+
+// ######### Modal Functions for Clear History #########
 
 
 async function pickProjectFolder() {
@@ -288,8 +498,15 @@ async function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
 
-  chat.innerHTML += `<div class="msg user">You: ${text}</div>`;
+  const userDiv = document.createElement("div");
+  userDiv.className = "msg user";
+  userDiv.innerHTML = `
+    <div class="message-content">${escapeHtml(text)}</div>
+  `;
+  chat.appendChild(userDiv);
+  
   input.value = "";
+  chat.scrollTop = chat.scrollHeight;
 
   const res = await fetch("/chat", {
     method: "POST",
@@ -303,24 +520,37 @@ async function sendMessage() {
     const data = await res.json();
     console.log(data);
     if (data.decision === "needs_files") {
-          renderAskFileAprove(data);
+      renderFileApprovalModal(data);
     }
   } else {
     await renderStream(chat, res);
   }
 
+  await loadAgentStatus(currentSessionId);
 }
 
 async function renderStream(chat, res) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
 
+  const streamId = 'streaming_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  
   let botDiv = document.createElement("div");
   botDiv.className = "msg bot";
-  botDiv.textContent = "Rob: ";
+  botDiv.id = streamId; 
+  botDiv.innerHTML = `
+    <div class="message-content" id="${streamId}_content"></div>
+  `;
+  
   chat.appendChild(botDiv);
-
+  
+  let streamingContent = document.getElementById(streamId + '_content');
   let buffer = "";
+  let partialContent = "";
+
+  setTimeout(() => {
+    chat.scrollTop = chat.scrollHeight;
+  }, 100);
 
   while (true) {
     const { done, value } = await reader.read();
@@ -333,67 +563,146 @@ async function renderStream(chat, res) {
     for (const line of lines) {
       if (!line.startsWith("data:")) continue;
       const payload = line.replace("data:", "").trim();
-      if (payload === "[DONE]") return;
+      if (payload === "[DONE]") {
+        streamingContent.innerHTML = formatMessageWithCode(partialContent);
+        
+        setTimeout(() => {
+          chat.scrollTop = chat.scrollHeight;
+        }, 50);
+        
+        return;
+      }
 
       try {
         const json = JSON.parse(payload);
         if (json.response) {
-          botDiv.textContent += json.response;
-          chat.scrollTop = chat.scrollHeight;
+          partialContent += json.response;
+          streamingContent.innerHTML = formatPartialMessage(partialContent);
+          
+          setTimeout(() => {
+            chat.scrollTop = chat.scrollHeight;
+          }, 10);
         }
       } catch {}
     }
   }
 }
 
-function renderAskFileAprove(data) {
-  app.innerHTML = `
-    <div class="file_request">
-      <h1>Aproval Request: ${ data.reason } Files needed: ${ data.files } </h1>
-      <div style="margin-top:12px">
-        <button id="aprove_file_button">Aprove</button>
-        <button class="secondary" id="cancel_file_button">Cancel</button>
-      </div>
-    </div>
-  `;
+function formatPartialMessage(text) {
+  let formatted = text;
+  
+  formatted = formatted.replace(/(\w+)\nCopy\n([\s\S]*?)(?=\n\n|\n$|$)/g, (match, language, code) => {
+    return `<div class="code-block partial"><pre><code>${escapeHtml(code.trim())}</code></pre></div>`;
+  });
+  
+  formatted = formatted.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, language, code) => {
+    return `<div class="code-block partial"><pre><code>${escapeHtml(code.trim())}</code></pre></div>`;
+  });
 
-  document.getElementById("cancel_file_button").onclick = async () => {
-    openSession(currentSessionId);
-    const chat = document.getElementById("chat");
-    data.result = false;
-    const res = await api("/file_request", {
-      method: "POST",
-      headers: {
-        "x-session-id": currentSessionId
-      },
-      body: JSON.stringify(data)
-    });
-    await renderStream(chat, res);
-  }
- 
-  document.getElementById("aprove_file_button").onclick = async () => {
-    openSession(currentSessionId);
-    const chat = document.getElementById("chat");
-    let filesData = `
-    PROJECT FILE CONTEXT (user-approved):
+  formatted = formatted.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+  
+  formatted = formatted.replace(/\n/g, '<br>');
+  
+  return formatted;
+}
+
+// ######### File Approval Modal #########
+
+function renderFileApprovalModal(data) {
+  // Guardar os dados para usar depois
+  window.pendingFileApprovalData = data;
+  
+  // Adicionar modal ao HTML se não existir
+  if (!document.getElementById("fileApprovalModal")) {
+    const modalHTML = `
+      <div id="fileApprovalModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content file-approval-modal">
+          <div class="modal-icon">
+          </div>
+          <h3>File Access Required</h3>
+          <div class="file-approval-content">
+            <div class="file-approval-reason">
+              <strong>Reason:</strong> <span id="fileReason">${data.reason}</span>
+            </div>
+            <div class="file-approval-files">
+              <strong>Files needed:</strong>
+              <ul id="fileList">
+                ${data.files.map(file => `<li>${file}</li>`).join('')}
+              </ul>
+            </div>
+            <div class="file-approval-warning">
+              <span>The assistant will read the content of these files to provide better assistance.</span>
+            </div>
+          </div>
+          <div class="modal-buttons">
+            <button id="fileModalCancel" class="modal-btn modal-cancel">Deny Access</button>
+            <button id="fileModalApprove" class="modal-btn modal-approve">Approve</button>
+          </div>
+        </div>
+      </div>
     `;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Configurar eventos
+    setupFileApprovalModal();
+  }
+  
+  // Atualizar conteúdo do modal
+  document.getElementById("fileReason").textContent = data.reason;
+  
+  const fileList = document.getElementById("fileList");
+  fileList.innerHTML = data.files.map(file => `<li>${file}</li>`).join('');
+  
+  // Mostrar modal
+  showFileApprovalModal();
+}
+
+function showFileApprovalModal() {
+  const modal = document.getElementById("fileApprovalModal");
+  if (modal) {
+    modal.style.display = "flex";
+  }
+}
+
+function hideFileApprovalModal() {
+  const modal = document.getElementById("fileApprovalModal");
+  if (modal) {
+    modal.style.display = "none";
+  }
+}
+
+async function approveFileAccess() {
+  const data = window.pendingFileApprovalData;
+  if (!data || !currentSessionId) return;
+  
+  hideFileApprovalModal();
+  
+  // Voltar para o chat
+  await openSession(currentSessionId);
+  const chat = document.getElementById("chat");
+  
+  try {
+    let filesData = `
+PROJECT FILE CONTEXT (user-approved):
+`;
     for (let file of data.files) {
       let fileContent = await readFile(file);
       filesData += `
-        File: ${file}
-        --------------------------------
-        ${fileContent}
-        --------------------------------  
-      `;
+File: ${file}
+--------------------------------
+${fileContent}
+--------------------------------  
+`;
     }
     filesData += `
-      Rules:
-      - This is the real file content
-      - Do not assume other files
-    `;
-    console.log(filesData);
+Rules:
+- This is the real file content
+- Do not assume other files
+`;
+    
     data.result = true;
     data.filesData = filesData;
+    
     const res = await api("/file_request", {
       method: "POST",
       headers: {
@@ -401,9 +710,72 @@ function renderAskFileAprove(data) {
       },
       body: JSON.stringify(data)
     });
+    
     await renderStream(chat, res);
-  };
+    
+  } catch (error) {
+    console.error("Error reading files:", error);
+    const errorDiv = document.createElement("div");
+    errorDiv.className = "msg bot";
+    errorDiv.innerHTML = `
+      <div class="message-sender">${currentAgentName}</div>
+      <div class="message-content">Error: Could not read the requested files. Please try again.</div>
+    `;
+    chat.appendChild(errorDiv);
+    chat.scrollTop = chat.scrollHeight;
+  }
+  
+
+  window.pendingFileApprovalData = null;
 }
+
+async function denyFileAccess() {
+  const data = window.pendingFileApprovalData;
+  if (!data || !currentSessionId) return;
+  
+  hideFileApprovalModal();
+  
+  await openSession(currentSessionId);
+  const chat = document.getElementById("chat");
+  
+  data.result = false;
+  const res = await api("/file_request", {
+    method: "POST",
+    headers: {
+      "x-session-id": currentSessionId
+    },
+    body: JSON.stringify(data)
+  });
+  
+  await renderStream(chat, res);
+
+  window.pendingFileApprovalData = null;
+}
+
+function setupFileApprovalModal() {
+  const modal = document.getElementById("fileApprovalModal");
+  const cancelBtn = document.getElementById("fileModalCancel");
+  const approveBtn = document.getElementById("fileModalApprove");
+  
+  if (!modal || !cancelBtn || !approveBtn) return;
+  
+  cancelBtn.onclick = denyFileAccess;
+  approveBtn.onclick = approveFileAccess;
+  
+  modal.onclick = (e) => {
+    if (e.target === modal) {
+
+    }
+  };
+  
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.style.display === 'flex') {
+      e.preventDefault();
+    }
+  });
+}
+
+// ######### File Approval Modal #########
 
 async function readFile(filePath) {
   const dirHandle = await loadHandle(currentSessionId);
@@ -555,7 +927,6 @@ function renderFileTree(tree) {
     return;
   }
   
-  // Organizar árvore hierárquica
   const fileTree = buildHierarchy(tree);
   const fileCount = tree.filter(item => item.type === "file").length;
   
@@ -567,7 +938,6 @@ function renderFileTree(tree) {
   
   container.innerHTML = html;
   
-  // Adicionar eventos de clique para pastas
   document.querySelectorAll('.folder-node').forEach(folder => {
     folder.addEventListener('click', function(e) {
       if (!e.target.closest('.folder-toggle')) return;
@@ -636,15 +1006,7 @@ function renderTreeNodes(node, level = 0) {
         </div>
       `;
     } else {
-      // Icones por tipo de arquivo
-      let icon = '📄';
-      if (name.endsWith('.py')) icon = '🐍';
-      else if (name.endsWith('.js')) icon = '📜';
-      else if (name.endsWith('.html')) icon = '🌐';
-      else if (name.endsWith('.css')) icon = '🎨';
-      else if (name.endsWith('.json')) icon = '📋';
-      else if (name.endsWith('.md')) icon = '📝';
-      
+      let icon = '📄';     
       html += `
         <div class="file-node" style="padding-left: ${level * 16 + 20}px" title="${name}">
           <span class="file-icon">${icon}</span>

@@ -331,6 +331,7 @@ export class AssistantDO extends DurableObject<Env> {
     Your goal is to provide fast, clear, and practical help with programming tasks.
 
     If no programming language is specified, assume ${this.stateData.languages}.
+    Always check for PROJECT FILE CONTEXT (user-approved), to see if the user gave you context for you to anwser the question.
 
     GENERAL BEHAVIOR
     - Be concise and direct
