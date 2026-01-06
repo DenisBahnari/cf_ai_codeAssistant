@@ -526,7 +526,7 @@ async function sendMessage() {
     if (data.decision === "needs_files") {
       renderFileApprovalModal(data);
     }
-  } else {
+  } else if (res.headers.get("content-type")?.includes("text/event-stream")) {
     await renderStream(chat, res);
   }
 
@@ -605,6 +605,8 @@ function formatPartialMessage(text) {
 
   formatted = formatted.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
   
+  formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
   formatted = formatted.replace(/\n/g, '<br>');
   
   return formatted;

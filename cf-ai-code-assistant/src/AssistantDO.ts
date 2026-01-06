@@ -548,7 +548,7 @@ export class AssistantDO extends DurableObject<Env> {
         const response = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
             messages: [
                 {role:"system", content: AssistantDO.SETTING_ANALYSER_SYSTEM},
-                {role:"user", content: question}
+                {role:"user", content: "Check if this user input is a setting rquest or no: " + question}
             ]
         });
         try {
@@ -564,54 +564,75 @@ export class AssistantDO extends DurableObject<Env> {
         }
     }
 
-    async askAssistantAI(question: string, filesData = ""): Promise<{stream: ReadableStream; fullText: () => Promise<string | undefined>}> {
-        console.log("CONTEXTO DA AI: " + this.getAssistantSystemPrompt(filesData));
-
-        const responseStream = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
+    async askAssistantAI(question: string, filesData = ""): Promise<{ stream: ReadableStream; fullText: () => Promise<string>;}> {
+        console.log("AI CONTEXT:", this.getAssistantSystemPrompt(filesData));
+        console.log(this.getChatHistoryFormatted(AssistantDO.CHAT_HISTORY_LENGTH));
+        
+        const responseStream = await this.env.AI.run(
+            "@cf/meta/llama-3-8b-instruct",
+            {
             messages: [
-                {role: "system", content: this.getAssistantSystemPrompt(filesData)},
+                { role: "system", content: this.getAssistantSystemPrompt(filesData) },
                 ...this.getChatHistoryFormatted(AssistantDO.CHAT_HISTORY_LENGTH),
-                {role: "user", content: question}
+                { role: "user", content: question }
             ],
             stream: true
-        });
+            }
+        );
 
         const [clientStream, internalStream] = responseStream.tee();
         const reader = internalStream.getReader();
+        const decoder = new TextDecoder();
 
         let buffer = "";
-        let currentText = "";
-        const decoder = new TextDecoder();
-        const fullTextPromise = (async () => {
-            while (true) {
-                const { done, value } = await reader.read();
+        let accumulatedText = "";
+        let streamEnded = false;
+
+        const fullText = async (): Promise<string> => {
+            try {
+            while (!streamEnded) {
+                const { value, done } = await reader.read();
                 if (done) break;
 
                 buffer += decoder.decode(value, { stream: true });
 
                 const lines = buffer.split("\n");
-                buffer = lines.pop() || "";
+                buffer = lines.pop() ?? "";
 
                 for (const line of lines) {
-                    if (!line.startsWith("data:")) continue;
-                    const payload = line.replace("data:", "").trim();
-                    if (payload === "[DONE]") break;
+                if (!line.startsWith("data:")) continue;
 
-                    try {
-                        const json = JSON.parse(payload);
-                        if (json.response) {
-                            currentText += json.response;
-                        }
-                    } catch {
-                        // ignore malformed chunks
+                const payload = line.slice(5).trim();
+
+                if (payload === "[DONE]") {
+                    streamEnded = true;
+                    break;
+                }
+
+                try {
+                    const json = JSON.parse(payload);
+                    if (typeof json.response === "string") {
+                    accumulatedText += json.response;
                     }
+                } catch {
+                    buffer = payload + "\n" + buffer;
+                    break;
+                }
                 }
             }
-            return currentText;
-        });
+            } finally {
+            reader.releaseLock();
+            }
 
-        return {stream: clientStream, fullText: fullTextPromise}
+            return accumulatedText;
+        };
+
+        return {
+            stream: clientStream,
+            fullText
+        };
     }
+
 
     async fetch(request: Request): Promise<Response> {
 
@@ -739,18 +760,20 @@ export class AssistantDO extends DurableObject<Env> {
                 return new Response(JSON.stringify(response), {headers: { "content-type": "application/json" }});
             }
 
-            const {stream, fullText} = await this.askAssistantAI(requestedText);
+            const { stream, fullText } = await this.askAssistantAI(requestedText);
 
-            fullText().then(async (finalAnswer) => {
+            this.ctx.waitUntil(
+            (async () => {
+                const finalAnswer = await fullText();
                 this.stateData.chatHistory.push({
-                    question: requestedText,
-                    answer: finalAnswer ?? ""
+                question: requestedText,
+                answer: finalAnswer ?? ""
                 });
                 await this.state.storage.put("stateData", this.stateData);
-                DB.createMessage(this.env, sessionId, "assistant", finalAnswer ?? "")
-                console.log(this.getChatHistoryFormatted(5));
-            })
-            
+                await DB.createMessage(this.env, sessionId, "assistant", finalAnswer ?? "");
+            })()
+            );
+
             return new Response(stream, {
                 headers: { "content-type": "text/event-stream" },
             });
