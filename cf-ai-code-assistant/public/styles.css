@@ -320,6 +320,7 @@ body {
   color: var(--primary-dark);
   margin-bottom: 1rem;
   padding-bottom: 0.5rem;
+  padding-top: 2rem;
   border-bottom: 2px solid var(--primary-light);
   font-weight: 600;
 }
@@ -784,45 +785,54 @@ body {
   to { transform: scale(1.15); }
 }
 
+.project-select-folder-div {
+  padding-bottom: 1rem;
+}
+
 #selectFolder {
-  background-color: #e7dbcb;
-  color: var(--text-dark);
-  border: 2px solid var(--border);
-  border-radius: var(--radius-sm);
+  color: var(--primary-dark);
+  font-size: 0.95rem;
+  background: linear-gradient(135deg, #f2e6d8, #e6d3bc);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
   cursor: pointer;
-  transition: all 0.3s ease;
+
+  padding: 0.5rem;
+
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
-  width: 44px;
-  height: 44px;
-  min-width: 44px;
-  position: relative;
-  overflow: hidden;
+  justify-self: center;
+
+  transition: 
+    background 0.25s ease,
+    transform 0.2s ease,
+    box-shadow 0.25s ease;
 }
 
 #selectFolder .folder-icon {
-  width: 20px;
-  height: 20px;
   object-fit: contain;
-  transition: all 0.3s ease;
+
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.15));
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+
+#selectFolder:hover {
+  background: linear-gradient(135deg, #f7ecdf, #ecd9c3);
+  transform: translateY(-2px);
 }
 
 #selectFolder:hover .folder-icon {
-  transform: scale(1.1);
+  transform: scale(1.15);
 }
 
-#selectFolder, #clear, #back {
-  background-color: var(--bg-light);
-  color: var(--text-dark);
-  border: 2px solid var(--border);
+#selectFolder:active {
+  transform: translateY(0);
+  box-shadow: 
+    0 3px 8px rgba(0, 0, 0, 0.1),
+    inset 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
-#selectFolder:hover, #clear:hover, #back:hover {
-  background-color: var(--border);
-  transform: translateY(-2px);
-}
 
 #clear {
   color: #DC2626;
@@ -830,7 +840,24 @@ body {
 }
 
 #back {
-  background-color: #d5dbe9;
+  font-size: 1rem;
+  transition: all 0.3s ease;
+  color: var(--text-white);
+  background: var(--gradient);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+#back:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
 }
 
 /* ============================================

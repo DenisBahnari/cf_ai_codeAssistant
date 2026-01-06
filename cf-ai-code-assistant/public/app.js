@@ -176,6 +176,7 @@ async function openSession(sessionId) {
     <div class="chat-layout">
       <!-- Sidebar estática com informações -->
       <div class="agent-sidebar">
+        <button id="back">Back</button>
         <div class="sidebar-section">
           <h3 class="sidebar-title">Session Info</h3>
           <div class="info-grid">
@@ -203,6 +204,11 @@ async function openSession(sessionId) {
             <h3 class="sidebar-title">Project Files</h3>
             <span id="fileCount" class="file-count">0 files</span>
           </div>
+          <div class="project-select-folder-div">
+            <button id="selectFolder" title="Select project folder">
+              Select Folder
+            </button>
+          </div>
           <div id="projectTree" class="file-tree">
             <div class="tree-placeholder">No project selected</div>
           </div>
@@ -218,11 +224,7 @@ async function openSession(sessionId) {
           <button id="micBtn" class="mic-button">
             <img src="assets/mic_icon.png" alt="Microphone" class="mic-icon" />
           </button>
-          <button id="selectFolder">
-            <img src="assets/folder_icon.png" alt="Folder" class="folder-icon" />
-          </button>
           <button id="clear">Clear</button>
-          <button id="back">Back</button>
         </div>
       </div>
     </div>
@@ -675,7 +677,7 @@ async function approveFileAccess() {
   hideFileApprovalModal();
   
   // Voltar para o chat
-  await openSession(currentSessionId);
+  //await openSession(currentSessionId);
   const chat = document.getElementById("chat");
   
   try {
@@ -732,7 +734,7 @@ async function denyFileAccess() {
   
   hideFileApprovalModal();
   
-  await openSession(currentSessionId);
+  //await openSession(currentSessionId);
   const chat = document.getElementById("chat");
   
   data.result = false;
