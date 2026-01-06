@@ -227,6 +227,9 @@ This project is also deployed in the Cloudflare platform:
 
 (recommended Google Chrome Browser)
 
+## Architecture
+
+<img width="572" height="562" alt="image" src="https://github.com/user-attachments/assets/ccb9abcb-811d-4bc1-ba5f-59c48aadff65" />
 
 ## Small Demo
 
