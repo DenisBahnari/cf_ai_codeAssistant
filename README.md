@@ -225,6 +225,12 @@ This project is also deployed in the Cloudflare platform:
 
 - URL: https://cf-ai-code-assistant.denisbahnari042.workers.dev/
 
-
 (recommended Google Chrome Browser)
+
+
+## Small Demo
+
+
+https://github.com/user-attachments/assets/24140bc7-70e6-47ee-bba4-8157bf0766c3
+
 
