@@ -236,95 +236,118 @@ export class AssistantDO extends DurableObject<Env> {
 
     private getContextEvaluatorPrompt(): string {
     return `
-    OUTPUT CONTRACT (READ CAREFULLY):
+    YOU ARE PART OF A MULTI-AGENT PIPELINE.
 
-    You MUST output ONLY a valid JSON object.
-    If you output ANY text before or after the JSON, the response is INVALID.
-    Do NOT explain.
-    Do NOT introduce yourself.
-    Do NOT restate the task.
-    Do NOT use natural language outside JSON.
+    Another agent will answer the user's question.
+    Your ONLY job is to decide if that agent needs project files.
 
-    ----------------------------------------
+    The user's question is NOT for you to answer.
+
+    ----------------------------------
+    OUTPUT RULE (ABSOLUTE):
+
+    - OUTPUT ONLY VALID JSON
+    - NO TEXT OUTSIDE JSON
+    - NO EXPLANATIONS
+    - NO APOLOGIES
+    - NO INTRODUCTIONS
+    - NO ANSWERING THE QUESTION
+
+    Answering the user question = FAILURE.
+
+    ----------------------------------
     TASK:
 
     Decide whether answering the user's question REQUIRES reading project files.
 
-    You DO NOT answer the question.
-    You ONLY decide if files are required.
-
-    ----------------------------------------
-    ALLOWED OUTPUT (EXACT SCHEMA):
+    ----------------------------------
+    OUTPUT FORMAT JSON (EXACT):
 
     {
     "decision": "needs_files" | "answer_possible",
-    "reason": "<short technical reason>",
+    "reason": "<short reason>",
     "files": ["existing/file/path"] | []
     }
 
-    ----------------------------------------
+    ----------------------------------
     DECISION RULES:
 
     Return "needs_files" if:
-    - The question refers to bugs, crashes, errors, or unexpected behavior
-    - The question refers to "my app", "this project", or implicit project context
-    - The answer depends on how THIS project is implemented
-    - There is ANY missing context
-    - You would need to inspect code to avoid guessing
+    - The question mentions bugs, errors, crashes, or unexpected behavior
+    - The question refers to "my app", "this project", or similar
+    - The answer depends on this project's implementation
+    - Any guessing would be required
+    - You would inspect code to be confident
 
     Return "answer_possible" ONLY if:
-    - The question is purely conceptual or theoretical
+    - The question is generic or theoretical
     - The answer does NOT depend on this project
-    - NO project-specific behavior is required
+    - No project-specific behavior is involved
 
-    If uncertain → "needs_files".
+    If in doubt → "needs_files"
 
-    ----------------------------------------
+    ----------------------------------
     FILE RULES (CRITICAL):
 
-    - You may ONLY reference files that EXIST in the provided project structure
-    - You may NEVER invent file names
-    - You may NEVER guess file paths
-    - Request the MINIMUM number of files
+    - ONLY reference files that EXIST in the project structure below
+    - NEVER invent file names or paths
     - NEVER request folders
-    - If no specific file is clearly required, request ONE main file only
+    - Request the MINIMUM number of files
+    - If unsure which file → request ONE main file only
 
-    ----------------------------------------
-    ABSOLUTE PROHIBITIONS:
+    ----------------------------------
+    PROJECT FILES (REFERENCE ONLY):
 
-    - NO text outside JSON
-    - NO explanations
-    - NO apologies
-    - NO role descriptions
-    - NO markdown
-    - NO invented files
+    ${this.getProjectContextBlock()}
 
-    ----------------------------------------
-    EXAMPLES (STRICT):
+    ----------------------------------
+    EXAMPLES:
 
-    User: "My app crashes with a null pointer"
-    Project structure: src/app.py
+    User: "How do I get the length of a list in Python?"
+    {
+    "decision": "answer_possible",
+    "reason": "General programming knowledge",
+    "files": []
+    }
 
+    ---
+
+    User: "My app crashes when saving a file"
+    Project files: src/app.py
     {
     "decision": "needs_files",
-    "reason": "Project-specific bug",
+    "reason": "Project-specific runtime issue",
     "files": ["src/app.py"]
     }
 
     ---
 
-    User: "What is a null pointer exception?"
-
+    User: "Why is my API returning 500?"
+    Project files: server.js, routes/api.js
     {
-    "decision": "answer_possible",
-    "reason": "General programming concept",
-    "files": []
+    "decision": "needs_files",
+    "reason": "Project-specific backend behavior",
+    "files": ["server.js"]
     }
 
-    ----------------------------------------
-    PROJECT STRUCTURE (REFERENCE ONLY):
+    ---
 
-    ${this.getProjectContextBlock()}
+    User: "Rob, I have a NullPointerException in my Person class, can you help me?"
+    Project files: src/Person.java, src/Car.java
+    {
+    "decision": "needs_files",
+    "reason": "Project-specific runtime exception",
+    "files": ["src/Person.java"]
+    }
+
+    ---
+
+    User: "Rob can you check if my DNS server is ok?"
+    {
+    "decision": "needs_files",
+    "reason": "Requires inspection of specific configuration",
+    "files": []
+    }
     `;
     }
 
@@ -447,6 +470,7 @@ export class AssistantDO extends DurableObject<Env> {
         });
         try {
             const responseJson = JSON.parse(response.response ?? "");
+            console.log("FolderFIlterAI: " + response.response);
             return responseJson;
         } catch (err) {
             console.error("Failed to parse setting intent:", response.response ?? "");
@@ -460,11 +484,12 @@ export class AssistantDO extends DurableObject<Env> {
         const response = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
             messages: [
                 {role:"system", content: this.getContextEvaluatorPrompt()},
-                {role:"user", content: question}
+                {role:"user", content: "Does this question needs context?:" + question}
             ]
         });
         try {
             const raw = response.response ?? "";
+            console.log("ContextCheckerAI: " + response.response);
             const parsed = this.extractJson(raw);
             return parsed;
         } catch (err) {
@@ -528,6 +553,7 @@ export class AssistantDO extends DurableObject<Env> {
         });
         try {
             const jsonResponse = JSON.parse(response.response ?? "")
+            console.log("SettingsAI:" + response.response);
             if (!jsonResponse || typeof jsonResponse.action !== "string") {
                 return {action: "none"};
             }
